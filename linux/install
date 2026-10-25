@@ -1,0 +1,162 @@
+#!/usr/bin/env bash
+# Install retro-wall's live wallpaper for the user running it, on Linux: X11, under XFCE, KDE Plasma,
+# GNOME, Cinnamon, MATE or LXDE, or a window manager alone.
+#
+#   linux/install [--no-packages]
+#
+# Run it as yourself, inside your desktop session, from a checkout of this repository. It:
+#
+#   1. installs the libraries retro-wall needs (cairo, fontconfig, OpenGL, X11), through sudo and
+#      apt, dnf or pacman, unless --no-packages is given or all of it is there
+#   2. copies retro-wall (built: target/release/retro-wall, or a retro-wall beside this script's directory)
+#      and the themes to ~/.local/share/retro
+#   3. writes ~/.config/autostart/retro-wall.desktop, so it starts with every session
+#   4. saves the desktop's wallpaper settings as they are (the first time only), draws the still
+#      picture, sets it as the desktop's wallpaper, and (re)starts retro-wall on this display
+#
+# Run outside a session (no DISPLAY), it does 1 to 3, and retro-wall starts at your next login.
+# Re-running it is how you update: it installs this checkout's version and restarts it.
+# Options for retro-wall go in ~/.config/retro/retro-wall.conf (see the README), which this never touches.
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+share="${HOME}/.local/share/retro"
+autostart="${HOME}/.config/autostart/retro-wall.desktop"
+packages=1
+
+for arg in "$@"; do
+	case $arg in
+		--no-packages) packages=0 ;;
+		*) sed -n '4p' "$0" | sed 's/^# *//' >&2; exit 2 ;;
+	esac
+done
+
+say() { printf 'retro-wall: %s\n' "$*"; }
+die() { printf 'retro-wall: %s\n' "$*" >&2; exit 1; }
+
+[[ $EUID -ne 0 ]] || die "run this as the desktop's user, not as root: it installs into your home"
+[[ $(uname -s) == Linux ]] || die "this is the Linux installer"
+binary="$here/target/release/retro-wall"
+[[ -x $binary ]] || binary="$here/retro-wall"
+[[ -x $binary ]] || die "no retro-wall built: run cargo build --release first"
+xfce=0                                         # XFCE's wallpaper is set through xfconf-query and gdbus, which it then needs
+[[ ${XDG_CURRENT_DESKTOP:-} != *XFCE* ]] && ! pgrep -u "$(id -u)" -x xfdesktop >/dev/null || xfce=1
+
+# --- 1. what it needs -------------------------------------------------------------------------------
+
+# Prints a line for each thing missing.
+missing() {
+	local lib libs ldconfig
+	ldconfig="$(PATH="$PATH:/usr/sbin:/sbin" command -v ldconfig || :)"   # outside a user's PATH on some systems
+	libs="$([[ -n $ldconfig ]] && "$ldconfig" -p 2>/dev/null || :)"
+	for lib in libcairo.so.2 libfontconfig.so.1 libGL.so.1 libX11.so.6 libXext.so.6 libXfixes.so.3 libXrandr.so.2; do
+		grep -q "$lib" <<<"$libs" || echo "$lib"
+	done
+	[[ $xfce == 0 ]] || command -v xfconf-query >/dev/null || echo "xfconf-query"
+	[[ $xfce == 0 ]] || command -v gdbus >/dev/null || echo "gdbus"
+}
+
+install_packages() {
+	local sudo=() pkgs
+	[[ $EUID -eq 0 ]] || sudo=(sudo)
+	if command -v apt-get >/dev/null; then
+		pkgs=(libcairo2 libgl1 libx11-6 libxext6 libxfixes3 libxrandr2 libfontconfig1)
+		[[ $xfce == 0 ]] || pkgs+=(xfconf libglib2.0-bin)
+		say "installing ${pkgs[*]}"
+		"${sudo[@]}" env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${pkgs[@]}"
+	elif command -v dnf >/dev/null; then
+		pkgs=(cairo mesa-libGL libX11 libXext libXfixes libXrandr fontconfig)
+		[[ $xfce == 0 ]] || pkgs+=(xfconf glib2)
+		say "installing ${pkgs[*]}"
+		"${sudo[@]}" dnf install -y "${pkgs[@]}"
+	elif command -v pacman >/dev/null; then
+		pkgs=(cairo libglvnd libx11 libxext libxfixes libxrandr fontconfig)
+		[[ $xfce == 0 ]] || pkgs+=(xfconf glib2)
+		say "installing ${pkgs[*]}"
+		"${sudo[@]}" pacman -S --needed --noconfirm "${pkgs[@]}"
+	else
+		return 1
+	fi
+}
+
+gaps="$(missing)"
+if [[ -n $gaps ]]; then
+	if [[ $packages == 1 ]]; then
+		install_packages || die "missing, and no apt-get, dnf or pacman to install it with:"$'\n'"$gaps"
+		gaps="$(missing)"
+	fi
+	[[ -z $gaps ]] || die "still missing:"$'\n'"$gaps"
+fi
+say "everything it needs is installed"
+
+# --- 2. the program ----------------------------------------------------------------------------------
+
+# every directory this has to create, recorded (outermost first) so linux/uninstall can take it away
+made=()
+for dir in "$share" "$(dirname "$autostart")"; do
+	while [[ ! -d $dir ]]; do made=("$dir" ${made[@]+"${made[@]}"}); dir="$(dirname "$dir")"; done
+done
+if [[ ${#made[@]} -gt 0 ]]; then
+	mkdir -p "$share" "$(dirname "$autostart")"
+	printf '%s\n' "${made[@]}" | awk '!seen[$0]++' >>"$share/created"
+fi
+install -m 755 "$binary" "$share/retro-wall"
+rm -rf "$share/themes"
+cp -R "$here/themes" "$share/themes"
+say "installed retro-wall and the themes in $share"
+
+# --- 3. at login ---------------------------------------------------------------------------------------
+
+cat >"$autostart" <<EOF
+[Desktop Entry]
+Type=Application
+Name=retro-wall
+Comment=retro-wall: the live wallpaper
+Exec=$share/retro-wall
+X-XFCE-Autostart-Override=true
+EOF
+say "retro-wall starts at login: $autostart"
+
+# --- 4. now, on this display -------------------------------------------------------------------------
+
+if [[ -z ${DISPLAY:-} ]]; then
+	say "no DISPLAY: not in a session, so it starts at your next login"
+	exit 0
+fi
+desktop="$("$share/retro-wall" --desktop which)"
+if [[ -n $desktop ]]; then
+	say "the desktop is $desktop: the still picture is set as its wallpaper"
+else
+	say "no desktop of its own is drawing a wallpaper: retro-wall shows the still picture itself"
+fi
+
+# This display's instances only: one user can have a session on more than one display.
+display_key() { local d="${1#*:}"; [[ $d == *.* ]] || d="$d.0"; printf '%s\n' "$d"; }
+this="$(display_key "$DISPLAY")"
+on_this_display() {
+	local pid d
+	for pid in $(pgrep -u "$(id -u)" -f "^$share/retro-wall( |\$)"); do
+		d="$(tr '\0' '\n' </proc/"$pid"/environ 2>/dev/null | sed -n 's/^DISPLAY=//p')"
+		[[ -n $d && $(display_key "$d") == "$this" ]] && echo "$pid"
+	done
+	return 0
+}
+
+# the desktop's wallpaper settings as they were before the first install, for linux/uninstall to put back
+[[ -e $share/desktop-before ]] || "$share/retro-wall" --desktop save "$share/desktop-before"
+"$share/retro-wall" --wallpaper
+
+pids="$(on_this_display)"
+if [[ -n $pids ]]; then
+	# shellcheck disable=SC2086
+	kill $pids 2>/dev/null || :
+fi
+setsid "$share/retro-wall" >"$share/retro-wall.log" 2>&1 </dev/null &
+sleep 3
+if [[ -n $(on_this_display) ]]; then
+	say "retro-wall is running on $DISPLAY (log: $share/retro-wall.log)"
+elif grep -q "software OpenGL" "$share/retro-wall.log" 2>/dev/null; then
+	say "this display has no hardware OpenGL, so it shows the still picture only (see the README, --software)"
+else
+	die "retro-wall did not stay up: $(tail -5 "$share/retro-wall.log")"
+fi

@@ -1,0 +1,93 @@
+[package]
+name = "retro-wall"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "A live desktop wallpaper: an animated retro scene with the machine's readings in it"
+license = "MIT"
+repository = "https://github.com/PacAnimal/retro-wall"
+readme = "README.md"
+keywords = ["wallpaper", "desktop", "opengl", "cairo", "synthwave"]
+categories = ["gui", "graphics", "rendering"]
+
+[dependencies]
+cairo-rs = { version = "0.21", default-features = false, features = ["png"] }
+gl = "0.14"
+toml = "1"
+serde = { version = "1", features = ["derive"] }
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+serde_json = "1"
+libc = "0.2"
+flate2 = "1"
+roxmltree = "0.20"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+x11-dl = "2.21"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSDate", "NSDictionary", "NSEnumerator", "NSError", "NSGeometry", "NSObjCRuntime", "NSRunLoop", "NSString", "NSURL", "NSValue"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSColor", "NSColorSpace", "NSEvent", "NSGraphics", "NSOpenGL", "NSOpenGLView", "NSResponder", "NSRunningApplication", "NSScreen", "NSView", "NSWindow", "NSWorkspace", "objc2-core-foundation"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFArray", "CFError", "CFPreferences", "CFString", "CFURL"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGWindow", "CGWindowLevel"] }
+objc2-core-text = { version = "0.3", default-features = false, features = ["std", "CTFontManager"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Wdk_System_SystemInformation",
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_OpenGL",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_Networking_WinSock",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_IO",
+    "Win32_System_JobObjects",
+    "Win32_System_Ioctl",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Power",
+    "Win32_System_Registry",
+    "Win32_System_RemoteDesktop",
+    "Win32_System_SystemInformation",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading",
+    "Win32_UI_HiDpi",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# The release build with its symbols and line tables, for profilers: cargo build --profile profiling
+[profile.profiling]
+inherits = "release"
+debug = "line-tables-only"
+strip = "none"
+
+# Development tools, not installed: cargo run --release --example NAME -- ARGS
+[[example]]
+name = "pngdiff"
+path = "tools/pngdiff.rs"
+
+[[example]]
+name = "side"
+path = "tools/side.rs"
+
+[[example]]
+name = "screen"
+path = "tools/screen.rs"
+
+[lints.clippy]
+# the drawing code passes many plain numbers and returns tuples of pictures, by design
+too_many_arguments = "allow"
+type_complexity = "allow"
+# every unsafe block says why it is sound
+undocumented_unsafe_blocks = "warn"
