@@ -1,0 +1,20 @@
+# Calls that panic on what a theme, the config or a plugin can give them. cairo-rs panics on a NUL in
+# text: text goes through util's show_text, text_extents and text_path, the font through select_mono
+disallowed-methods = [
+    { path = "cairo::Context::show_text", reason = "panics on a NUL: use util::show_text" },
+    { path = "cairo::Context::text_extents", reason = "panics on a NUL: use util::text_extents" },
+    { path = "cairo::Context::text_path", reason = "panics on a NUL: use util::text_path" },
+    { path = "cairo::Context::show_text_glyphs", reason = "panics on a NUL" },
+    { path = "cairo::Context::select_font_face", reason = "panics on a NUL: use util::select_mono" },
+    { path = "cairo::FontFace::toy_create", reason = "panics on a NUL: use util::select_mono" },
+    { path = "cairo::ScaledFont::text_extents", reason = "panics on a NUL" },
+    { path = "cairo::ScaledFont::text_to_glyphs", reason = "panics on a NUL" },
+    { path = "cairo::Matrix::invert", reason = "panics on a singular matrix: use try_invert" },
+    # a float of seconds that is negative, NaN or too large panics
+    { path = "std::time::Duration::from_secs_f64", reason = "panics out of range: use util::seconds" },
+    { path = "std::time::Duration::from_secs_f32", reason = "panics out of range: use util::seconds" },
+    { path = "std::time::Duration::mul_f64", reason = "panics out of range" },
+    { path = "std::time::Duration::mul_f32", reason = "panics out of range" },
+    { path = "std::time::Duration::div_f64", reason = "panics out of range" },
+    { path = "std::time::Duration::div_f32", reason = "panics out of range" },
+]

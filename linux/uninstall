@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Remove retro-wall's live wallpaper for the user running it, on Linux.
+#
+#   linux/uninstall [--purge]
+#
+# Run it inside your desktop session. Stops retro-wall on every display of yours, puts the desktop's
+# wallpaper settings back exactly as they were before the first install (your wallpaper), and removes
+# its autostart entry, the program and the themes, the pictures they drew, its cache, and any directory
+# the installer had to create. --purge also removes your options, ~/.config/retro/retro-wall.conf. The
+# packages the installer added stay: other software may use them.
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+share="${HOME}/.local/share/retro"
+purge=0
+for arg in "$@"; do
+	case $arg in
+		--purge) purge=1 ;;
+		*) sed -n '4p' "$0" | sed 's/^# *//' >&2; exit 2 ;;
+	esac
+done
+say() { printf 'retro-wall: %s\n' "$*"; }
+die() { printf 'retro-wall: %s\n' "$*" >&2; exit 1; }
+# the desktop's settings can only be put back from inside the session, so check before removing anything
+[[ ! -e $share/desktop-before || -n ${DISPLAY:-} ]] ||
+	die "run this inside your desktop session: it puts the desktop's wallpaper settings back as they were"
+program="$here/target/release/retro-wall"      # it puts the settings back: this checkout's, else the installed one
+[[ -x $program ]] || program="$here/retro-wall"
+[[ -x $program ]] || program="$share/retro-wall"
+[[ ! -e $share/desktop-before || -x $program ]] ||
+	die "no retro-wall to put the desktop's settings back with: build it first"
+
+pattern="^$share/retro-wall( |\$)"
+if pkill -u "$(id -u)" -f "$pattern"; then
+	for _ in $(seq 50); do pgrep -u "$(id -u)" -f "$pattern" >/dev/null || break; sleep 0.1; done
+	say "stopped retro-wall"
+fi
+rm -f "${HOME}/.config/autostart/retro-wall.desktop"
+
+if [[ -e $share/desktop-before ]]; then
+	"$program" --desktop restore "$share/desktop-before"
+	rm -f "$share/desktop-before"
+	say "the desktop's wallpaper settings are back as they were before installing"
+fi
+
+rm -f "$share/retro-wall" "$share/retro-wall.log" "$share"/wallpaper-*.png
+rm -rf "$share/themes" "$share/cache" "${XDG_CACHE_HOME:-$HOME/.cache}/retro-wall"   # the drawn layers, the font
+if [[ $purge == 1 ]]; then
+	rm -f "${HOME}/.config/retro/retro-wall.conf"
+	rmdir "${HOME}/.config/retro" 2>/dev/null || :
+fi
+# the directories the installer made, deepest first, each only if nothing else has been put in it
+if [[ -e $share/created ]]; then
+	created="$(tac "$share/created")"
+	rm -f "$share/created"
+	while read -r dir; do
+		if [[ -n $dir ]]; then rmdir "$dir" 2>/dev/null || :; fi
+	done <<<"$created"
+fi
+say "removed"

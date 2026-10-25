@@ -1,0 +1,24 @@
+# phosphor: a synthwave horizon in the amber of an old CRT's phosphor. The default: with no theme named,
+# this is what is drawn. Its sun, floor, stripes and brackets are its own elements, and their
+# shapes its own tweaks, which [tweaks] here or in a theme that extends this one can set.
+name = "Phosphor"
+
+scene = ["sky", "sun", "rays", "shimmer", "mountains", "floor", "bloom", "horizon", "stripes", "title",
+	"brackets", "instruments", "finish", "ruler"]
+
+[palette]
+base = "#280d05"          # the sky
+shadow = "#1c0803"        # the instruments' boxes and the reels' spools
+deep = "#2a0a03"          # the far end of the hostname's extrusion
+ramp = ["#5a1e0a", "#7a2c10", "#9a3c16", "#ba501c", "#d26a2a", "#e8823f"]
+                          # dark to bright: the six stripes; the floor's lines (3rd), the horizon, the needles
+                          # and the download range (5th), the upload range (1st, its ridge the 4th)
+sun_top = "#f8cc98"       # the sun, at its top
+sun_bottom = "#a8401a"    # and at the horizon
+title_top = "#ffe0b8"     # the hostname's face, top to bottom
+title_light = "#f5b888"
+title_bottom = "#c8501c"
+glow = "#f0a167"          # the sun's light on the ground, under it
+ridge = "#e0905c"         # the download range's ridge
+caption = "#a0603a"       # the ruler, the instruments' lines and lettering, the status line
+bracket = "#7a4020"       # the corner brackets
