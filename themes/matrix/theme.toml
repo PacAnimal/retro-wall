@@ -1,0 +1,64 @@
+# matrix: the digital rain of The Matrix (1999), and nothing else: a pure animated wallpaper. Columns of
+# the film's glyphs stand still in the dark while bright fronts fall down them, a white glyph flickering
+# at each head, the lit code fading behind it.
+#
+# Where it comes from:
+# - The code's glyphs: the film's own, shipped as outlines beside this file (MatrixCode.json).
+# - The hostname's lettering: after the film's title, likewise (Matrix.json).
+# - The colours: the film's green, as the "Matrix Digital" palette has it,
+#   https://www.colorpickercode.com/color-palette/dark-mode-palettes/matrix-digital/
+# Both are drawn as paths, at any size, with nothing fetched and nothing to fall back on.
+#
+# The hostname, the instruments and the network's graph are all there, and all hidden: show any in
+# retro.toml's [monitors] (title = "rightmost", widgets = "rightmost", graph = "rightmost").
+#
+name = "Matrix"
+
+scene = ["void", "rain", "codetitle", "mountains", "instruments", "finish"]
+
+[monitors]                 # a pure animated wallpaper: no hostname, no instruments, no graph, unless asked for
+title = "none"
+widgets = "none"
+graph = "none"
+
+[palette]                  # the film's green on black
+base = "#000000"           # the dark the rain falls through
+shadow = "#0d0208"         # the instruments' boxes
+deep = "#003b00"
+ramp = ["#002200", "#003b00", "#006b0c", "#008f11", "#00ff41", "#7fff7f"]   # dark to bright: the needles and the graph
+glow = "#00ff41"
+ridge = "#7fff7f"          # the download's ridge
+caption = "#008f11"        # the instruments' lines and lettering, the status line
+bracket = "#003b00"
+title_top = "#b8ffc8"
+title_light = "#00ff41"
+title_bottom = "#008f11"
+
+[tweaks]
+corner = 0.03              # a scene, not a terminal: no brackets; the header where their corners would be
+ruler_end = 0.0
+rule = false
+vignette = 0.35            # the dark round the edges, as the film's frame has it
+scanlines = false          # no CRT rows: it is film, not a terminal
+
+[element.void]
+
+[element.rain]             # its settings, as they are: change any here or in a theme of your own
+type = "code-rain"
+cell = 0.027               # a glyph's height, of the screen's short side (about 90 columns on a 16:9 screen),
+                           # scaled a little so that whole columns fill the width
+shape = 1.35               # as tall as wide, times
+speed = [8.0, 20.0]        # glyphs a second, slowest and fastest front
+trail = [0.5, 1.3]         # how far behind its head a front's light lasts, of the screen's height
+fronts = 1.7               # fronts a column, on average
+flicker = 14.0             # the heads' glyph changes a second
+bloom = [0.6, 0.22]        # the glow round each glyph, and the light round each lit column
+palette = ["#000000", "#0a4d1e", "#19e66b", "#d8ffe4"]   # a glyph from unlit to brightest
+cursor = "#b4ffc8"         # the head's glyph
+
+[element.codetitle]
+colour = "#00ff41"
+
+[element.mountains]        # the network's graph, if shown: along the bottom edge, not on a horizon there is none of
+place = "edge"
+size = 0.08
