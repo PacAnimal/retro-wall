@@ -1,0 +1,24 @@
+#!/bin/sh
+# gpu-temp: the graphics card's temperature in degrees Celsius, which reads well on a 0 to 100 meter.
+# From nvidia-smi when there is one, else from the kernel's sensors (amdgpu, nouveau, i915, radeon).
+# Prints nothing, and is shown dimmed, when neither has a reading.
+#
+#   install -m 755 gpu-temp ~/.config/retro/sources/gpu-temp
+if command -v nvidia-smi >/dev/null 2>&1; then
+    t=$(nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits 2>/dev/null | head -n 1)
+    if [ -n "$t" ]; then
+        echo "$t"
+        exit 0
+    fi
+fi
+for hw in /sys/class/hwmon/hwmon*; do
+    case $(cat "$hw/name" 2>/dev/null) in
+        amdgpu | nouveau | i915 | radeon | xe)
+            if [ -r "$hw/temp1_input" ]; then
+                awk '{ printf "%.0f\n", $1 / 1000 }' "$hw/temp1_input"
+                exit 0
+            fi
+            ;;
+    esac
+done
+exit 1
