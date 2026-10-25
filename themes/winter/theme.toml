@@ -1,0 +1,70 @@
+# winter: a frozen land that follows the day. By the local clock, the sun crosses the sky low and
+# pale and sets behind the far ridges, and the moon takes its place over a starred night; the snow
+# falls through it all, carried by the wind and shoved about by its gusts. Rocks break through the snow,
+# and a fence of leaning posts goes off toward nothing.
+#
+# The `day` tweak is the hours the sun is up; by
+# day the [day] look lies over the palette and tweaks below (which are the night's), so the instruments
+# read on a bright sky. --demo HH:mm holds the time of day, to see it at noon now.
+name = "Winter"
+
+scene = ["sky", "clouds", "orb", "beams", "land", "haze", "mountains", "snow", "title", "instruments", "finish", "ruler"]
+
+[palette]
+base = "#0b111b"
+shadow = "#070b12"
+deep = "#1b2636"
+ramp = ["#22303f", "#34475a", "#4d6680", "#6f8aa6", "#a9c2da", "#e4eef8"]
+sun_top = "#f4f8fc"
+sun_bottom = "#9ab4cc"
+title_top = "#f6fafe"
+title_light = "#c9dcee"
+title_bottom = "#4a6886"
+glow = "#bcd8f2"
+ridge = "#c4dcf2"
+caption = "#9fb6cc"
+bracket = "#6d8299"
+
+[tweaks]
+day = [7.5, 16.5]        # the hours the sun is up: the sky, the light and the look follow them
+status_zoom = 1.6        # the network's status line, larger: under the graph in the corner
+ruler_end = 0.0          # the ruler thin and ticking its whole length
+corner = 0.03             # the header where the upper right bracket's corner was: no brackets in a scene
+horizon_y = 0.64
+vignette = 0.45
+
+[element.sky]
+type = "winter-sky"
+
+[element.clouds]            # faint, very slowly drifting
+type = "drift"
+band = [0.04, 0.5]
+speed = 2.5
+alpha = 0.22
+
+[element.haze]              # very faint, low over the snow
+type = "drift"
+band = [0.6, 0.86]
+speed = 5.0
+alpha = 0.09
+stretch = 6.0
+wisps = 30
+seed = 4
+
+[element.mountains]
+place = "corner"          # the network's traffic in the bottom right corner, over the snow (no brackets: a scene)
+card = true               # in a card as the meters are, the status line with it
+frost = 6                 # its glass frosted: what lies under it blurred
+size = 0.1
+fade = 0.04
+
+[day.palette]                # by day: the cards frosted glass, the lines, text and graph dark on them
+shadow = "#eef3f8"
+caption = "#2a3a4c"
+deep = "#4d6178"             # the lettering's extrusion, soft on the bright sky
+ramp = ["#3c5a78", "#6a83a0", "#4d6680", "#2c4a68", "#1e3a5c", "#e4eef8"]
+ridge = "#24496e"
+
+[day.tweaks]
+deck_fill = ["#eef3f8", 0.42]
+spool_fill = ["#eef3f8", 0.5]

@@ -1,0 +1,90 @@
+# night city: a cyberpunk city at night, in the rain. Towers stand against a sky lit violet by the city,
+# a big moon low behind them; their windows light and go dark, a few a second across the city; the
+# street below is wet and mirrors them; it rains. The hostname is a neon sign, which now and then
+# stutters. The network's traffic rises as mountains behind the far towers.
+#
+# It is the scene that makes it a city; the palette colours what every theme has: the instruments, the
+# lettering, the mountains.
+name = "Night city"
+
+scene = ["sky", "moon", "skyline-far", "skyline-mid", "skyline-near", "street", "windows", "reflections", "shore",
+	"mountains", "rain", "title", "instruments", "finish", "ruler"]
+# There are beacons too, red aircraft-warning lights blinking on the tallest masts: put "beacons" after
+# "windows" in a theme that extends this one to have them
+
+[palette]
+base = "#07050f"
+shadow = "#05040b"
+deep = "#160a26"
+ramp = ["#2a1450", "#3a1d6a", "#55288a", "#7b3ab0", "#ff4fb0", "#ff86cf"]
+sun_top = "#f3ecff"
+sun_bottom = "#b9a6e6"
+title_top = "#fff0fa"
+title_light = "#ff3fb4"
+title_bottom = "#b0127a"
+glow = "#ff8fd0"
+ridge = "#5fe7ff"
+caption = "#4fb6d6"
+bracket = "#2f5f80"
+
+[tweaks]
+corner = 0.03             # the header where the upper right bracket's corner was: no brackets in a scene
+sun = [0.24, 0.17]          # the moon: where it stands, and its radius
+horizon_y = 0.72
+vignette = 0.5
+status_zoom = 1.6        # the network's status line, larger: under the graph in the corner
+scanline = [3, 0.07]
+download = ["#ff4fb0", 0.108, "#5fe7ff", 0.45]   # fainter ranges than phosphor's (the colours are the palette's)
+upload = ["#2a1450", 0.45, "#7b3ab0", 0.45]
+
+[element.sky]
+type = "night-sky"
+
+[element.moon]
+type = "moon"
+
+[element.skyline-far]
+type = "skyline"
+seed = 3
+heights = [0.10, 0.36]
+breadth = [0.018, 0.05]
+haze = 0.55
+window = 0.0032
+downtown = 0.66
+
+[element.skyline-mid]
+type = "skyline"
+seed = 8
+heights = [0.06, 0.26]
+breadth = [0.03, 0.07]
+haze = 0.25
+window = 0.0042
+downtown = 0.35
+
+[element.skyline-near]
+type = "skyline"
+seed = 13
+heights = [0.03, 0.14]
+breadth = [0.05, 0.12]
+haze = 0.0
+window = 0.0058
+downtown = 0.8
+
+[element.windows]
+skylines = ["skyline-far", "skyline-mid", "skyline-near"]   # far to near: a nearer one hides what is behind
+lit = 0.45
+
+[element.street]
+mirror = ["skyline-far", "skyline-mid", "skyline-near"]
+
+[element.reflections]
+windows = "windows"
+
+[element.title]
+style = "tube"
+flicker = true
+
+[element.mountains]
+place = "corner"            # the traffic in the bottom right corner, over the water (no brackets: a scene)
+size = 0.1                  # of the screen's height
+fade = 0.04                 # its fade out at the left: short, so it ends near abruptly

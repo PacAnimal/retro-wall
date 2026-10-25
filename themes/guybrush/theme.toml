@@ -1,0 +1,94 @@
+# guybrush: a painted pirate island in a turquoise sea, under swirling clouds, its volcano smoking. SVG
+# layers on one canvas (beside this file), each drawn at the screen's own size: the sky and the open sea
+# behind; the clouds drifting by; the sea's waves swaying and its surf shimmering; the volcano's plume, in
+# four sections, billowing; and the island, its rocks and its ships in front, still. The lettering takes
+# the island's colours; the instruments stand unframed and shadowed at the top left, clear of the volcano
+# and the town; the graph runs along the bottom, in the ocean's colours.
+#
+name = "Guybrush"
+
+scene = ["sky", "clouds", "waves", "smoke", "island", "mountains", "title", "instruments", "finish"]
+
+[[group]]                  # the readings at the top left, clear of the volcano and the town, as the desktop
+anchor = "top-left"        # monitors show them, in two rows; a retro.toml's own layout wins over this
+widgets = ["cpu-ring", "ram-ring"]
+
+[[group]]                  # the second row: placed clear of the first, under it
+anchor = "top-left"
+widgets = ["swap-bar", "battery"]
+
+[widget.cpu-ring]
+type = "ring"
+source = "cpu"
+label = "CPU"
+
+[widget.ram-ring]
+type = "ring"
+source = "ram"
+label = "RAM"
+
+[widget.swap-bar]
+type = "bar"
+source = "swap"
+label = "SWAP"
+
+[widget.battery]
+type = "battery"
+label = "BAT"
+
+[[group]]                  # the network's status line under the hostname, on a card of its own
+anchor = "under-title"
+widgets = ["status"]
+
+[palette]                  # the lettering from the island: its greenery on top, its sand and rock below;
+base = "#1a7fd0"           # the ocean's blue, under the picture
+shadow = "#8ccaf0"         # light blue
+deep = "#2e1c10"           # the lettering's extrusion, far: dark rock
+ramp = ["#04306a", "#5a3a22", "#b0682a", "#3fc4ea", "#4ff0d0", "#e6c27a"]   # the fifth: the instruments' lit part, sea green
+sun_top = "#fff4c2"
+sun_bottom = "#ffb84a"
+title_top = "#c8f56a"      # the jungle's sunlit leaves
+title_light = "#5cbf2e"    # its green
+title_bottom = "#9a5a30"   # the cliffs' rock (the ramp's last: the beaches' sand, between)
+glow = "#d8f7a0"
+ridge = "#e6fdff"          # the download's ridge: surf
+caption = "#ffffff"        # the instruments' tracks, numbers' names: white
+bracket = "#0a2c52"
+
+[tweaks]
+corner = 0.03             # the header where a bracket's corner would be: a scene, no brackets
+crop_centre = [0.75, 0.5]  # a portrait screen keeps the harbour town whole, and loses the island's left first
+ruler_end = 0.0
+rule = false               # nothing under the hostname
+status_zoom = 1.6
+status_colours = ["#ffffff", "#ffffff"]   # the status line white, over its shadow
+status_shadow = [1.5, 2.0, 1.2, 1.0, "#010c1a"]
+card_frame = false         # the instruments unframed, over the picture, each its name beneath it
+card_shadow = [3.0, 4.0, 1.5, 2.0, "#000814"]   # a deep shadow, down and right: they read on sky and sea
+horizon_y = 0.375         # the canvas's horizon: 350 of 933
+vignette = 0.2
+download = ["#000000", 0.45, "#000000", 0.85]   # the graph's ocean: deep and surf (colours: the palette's)
+upload = ["#000000", 0.7, "#000000", 0.75]
+
+[element.sky]             # the gradient sky and the open sea
+type = "layer"
+file = "sky.svgz"
+
+[element.island]          # the island, its rocks and its ships, in front of what moves
+type = "layer"
+file = "island.svgz"
+
+[element.clouds]
+erase = [[905.0, 92.0, 948.0, 126.0]]          # a stray wisp at the long streak's end
+fades = [[985.0, 170.0, 1075.0, 285.0],         # the edge the island hid, under the smoke
+	[505.0, 0.0, 330.0, 55.0]]                       # the long streak's end the smoke hid, top left: thinned out before it
+
+[element.smoke]
+erase = [[494.0, 12.0, 528.0, 28.0]]            # the end of a cloud's streak, caught in the smoke's top
+
+[element.mountains]
+place = "edge"            # the network's traffic along the whole bottom edge, in the ocean's colours
+size = 0.08
+scale = "#7fe8ff"         # its scale: bright blue, bold, with the status line's shadow
+bold = true
+colours = ["#6fe0f5", "#e6fdff", "#04306a", "#3fc4ea"]   # the ocean: shallows, surf, deep, its crest

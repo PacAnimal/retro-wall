@@ -1,0 +1,35 @@
+# aurora: an arctic night. Aurora curtains drift slowly across a clear sky full of stars, rising, falling
+# and shimmering, over snowy massifs on the horizon; the open water below mirrors both, swaying.
+#
+name = "Aurora"
+
+scene = ["sky", "aurora", "ranges", "lake", "water", "mountains", "title", "instruments", "finish", "ruler"]
+
+[palette]
+base = "#030914"
+shadow = "#020610"
+deep = "#06202a"
+ramp = ["#0b3a4a", "#0f5560", "#177a78", "#23a08c", "#5cf0b4", "#a8ffd8"]
+sun_top = "#e8fff4"
+sun_bottom = "#2fd8c0"
+title_top = "#f2fffb"
+title_light = "#bff6ec"
+title_bottom = "#2fb8a8"
+glow = "#7affc8"
+ridge = "#8affd0"
+caption = "#5aa8b4"
+bracket = "#2c5a68"
+
+[tweaks]
+status_zoom = 1.6        # the network's status line, larger: under the graph in the corner
+corner = 0.03             # the header where the upper right bracket's corner was: no brackets in a scene
+horizon_y = 0.74
+vignette = 0.5
+
+[element.sky]
+type = "arctic-sky"
+
+[element.mountains]
+place = "corner"          # the traffic in the bottom right corner, over the ice (no brackets: a scene)
+size = 0.1
+fade = 0.04

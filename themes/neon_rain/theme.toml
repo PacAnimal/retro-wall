@@ -1,0 +1,101 @@
+# neon rain: a room high over a rainy neon city at night, seen from the sofa, painted. Out of the window
+# the city's signs and its ring glow and now and then dim, each in its own time; the neon tube in the
+# corner of the room flickers once in a while, and its light on the room with it; the TV runs one
+# broadcast after another; rain falls over the city, and drops run down the glass.
+#
+# No code of its own: a painting and its patches, placed in [element] tables. Its pictures are beside
+# this file: the painting with its lights off and its TV dark, each light to lay over it, the
+# broadcasts, and the window's glass.
+name = "Neon rain"
+extends = "night_city"
+
+scene = ["room", "neon", "rain", "drops", "frame", "lamp", "tv", "mountains", "title", "instruments", "finish"]
+
+[[group]]                   # the readings down the left from its top, as neon bars of cells
+anchor = "top-left"
+direction = "column"
+widgets = ["cpu-cells", "ram-cells", "swap-cells"]
+
+[[group]]                   # the network's status line, under its graph in the bottom right corner
+anchor = "status"
+widgets = ["status"]
+
+[widget.cpu-cells]
+type = "cells"
+source = "cpu"
+label = "CPU"
+
+[widget.ram-cells]
+type = "cells"
+source = "ram"
+label = "RAM"
+
+[widget.swap-cells]
+type = "cells"
+source = "swap"
+label = "SWAP"
+
+[tweaks]
+title_corner = "bottom-left"   # the hostname down in the bottom left, where the painting is quietest
+title_shadow = [5.0, 7.0, 3.0, 1.0, "#000000"]   # over a drop shadow, so it reads on the sill
+tube_unlit = 0.5            # a letter flickered off: dull, but plain to see
+rule = false                # no ruled line under it, and no ruler
+card_frame = false          # the readings unframed, over the picture
+vignette = 0.35
+crop_centre = [0.3, 0.5]    # the painting's centre, where a screen of another shape crops it: the window
+canvas = [2560.0, 1440.0]   # the painting (room.png, light.png): what everything is placed on
+canvas_source = [1672.0, 941.0]   # the first painting, which lights/ and glass.png are cut from
+canvas_scale = [1.5311004784688995, 1.5309953949698902]   # its scale onto this one
+
+[element.room]              # the painting with its lights off, its office floors lit for good
+type = "painting"
+image = "room.png"
+steady = [
+	{ image = "lights/city_windows_left.png", at = [11, 113] },
+	{ image = "lights/city_windows_middle.png", at = [415, 189] },
+	{ image = "lights/city_windows_right.png", at = [753, 304] },
+]
+
+[element.neon]              # the city's signs and its ring, each dimming now and then in its own time
+type = "lights"
+patches = [                 # where each stands on the first painting: x, y, width, height
+	{ name = "city_portrait", image = "lights/city_portrait.png", rect = [175, 79, 112, 296] },
+	{ name = "city_rooftop", image = "lights/city_rooftop.png", rect = [190, 0, 71, 77] },
+	{ name = "city_cyan_tower", image = "lights/city_cyan_tower.png", rect = [341, 202, 60, 189] },
+	{ name = "city_ring", image = "lights/city_ring.png", rect = [528, 87, 236, 71] },
+	{ name = "city_cyan_foreground", image = "lights/city_cyan_foreground.png", rect = [218, 449, 81, 183] },
+	{ name = "city_pink_small", image = "lights/city_pink_small.png", rect = [102, 458, 70, 99] },
+	{ name = "city_pink_low", image = "lights/city_pink_low.png", rect = [300, 663, 76, 154] },
+]
+
+[element.rain]              # the night city's rain beyond the glass, a downpour: no splashes, it lands out of sight
+drops = 2200
+angle = 10.0                # slanting to the right, then as the wind turns, through straight down to the left
+sway = 240.0                # seconds each way
+tiled = true                # drawn once into tiles that scroll: a downpour for the price of a drizzle
+colour = "#cfc9ff"
+alpha = [0.1, 0.5]
+length = [0.016, 0.06]
+splash = 0.0
+
+[element.drops]             # rain on the glass: beads that sit, and drops that run down it
+type = "glass-drops"
+mask = "glass.png"
+window = [0.0, 1600.0]      # the glass's span across the painting, where drops are placed
+pillar = [880.0, 925.0]     # the pillar between her two windows: no glass, though its mask has a thin pane
+
+[element.frame]             # the room over the rain, the glass cut out of it, the beads on the glass
+type = "glass-frame"
+image = "room.png"
+mask = "glass.png"
+pillar = [880.0, 925.0]
+beads = "drops"
+
+[element.lamp]              # the neon tube's light on the wall, on her and on the table
+type = "lamp"
+image = "light.png"
+
+[element.tv]                # the TV: one broadcast after another, static, and now and then a tear
+type = "screen"
+channels = "tv"
+at = [1932.0, 0.0]
