@@ -1,0 +1,24 @@
+# teal: phosphor turned to sea green, with a fog of its own drifting over the floor, thicker as the CPU
+# works. A whole theme is only what it changes; everything else is phosphor's.
+#
+#   cp -r teal ~/.config/retro/themes/        then  retro-wall --theme teal
+#   retro-wall --preview /tmp/teal.png 1920x1080 --theme ./teal      to look at it first
+name = "Teal"
+extends = "phosphor"
+
+# phosphor's scene, with the fog put over the floor and under the horizon's line
+scene = ["sky", "sun", "rays", "shimmer", "mountains", "floor", "fog", "bloom", "horizon", "stripes", "title",
+	"brackets", "instruments", "finish", "ruler"]
+
+[palette]
+hue = 175                   # every colour turned about the colour wheel, its light and shade kept
+
+[tweaks]
+vignette = 0.45
+
+[element.fog]
+type = "shader"
+fragment = "shaders/fog.frag"
+area = [0.0, 0.55, 1.0, 1.0]    # left, top, right, bottom: the lower part of the screen
+readings = ["cpu"]
+fps = 20.0

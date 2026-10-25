@@ -1,0 +1,25 @@
+#!/bin/sh
+# headlines: the first titles of a news feed (RSS), as one line of text for a ticker. Run every few
+# minutes from a [source.headlines] table in retro.toml (see retro.toml here), which can give the feed
+# as the first argument.
+#
+#   install -m 755 headlines ~/.config/retro/sources/headlines
+feed=${1:-https://feeds.bbci.co.uk/news/world/rss.xml}
+curl -fsSL --max-time 20 "$feed" |
+    tr '\n\r\t' '   ' |
+    sed 's/<!\[CDATA\[//g; s/\]\]>//g' |
+    awk '{ s = s $0 }
+    END {
+        n = 0; out = ""
+        while (n < 9 && match(s, /<title>[^<]*<\/title>/)) {
+            t = substr(s, RSTART + 7, RLENGTH - 15)
+            s = substr(s, RSTART + RLENGTH)
+            if (n++ == 0) continue                  # the feed'"'"'s own title
+            gsub(/&quot;/, "\"", t); gsub(/&#39;|&apos;/, "'"'"'", t); gsub(/&lt;/, "<", t); gsub(/&gt;/, ">", t)
+            gsub(/&amp;/, "\\&", t)
+            gsub(/\\/, "/", t); gsub(/"/, "\\\"", t)
+            out = out (out == "" ? "" : "   //   ") t
+        }
+        if (out == "") exit 1
+        printf "{\"text\": \"%s\"}\n", out
+    }'

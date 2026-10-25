@@ -1,0 +1,10 @@
+#!/bin/sh
+# clock: the time, as text, for a ticker. A streaming source: it says so on its first line, then
+# prints a line whenever the minute turns. retro-wall stops it while the wall is paused.
+#
+#   install -m 755 clock ~/.config/retro/sources/clock
+echo '{"stream": true}'
+while :; do
+    printf '{"text": "%s"}\n' "$(date '+%H:%M  %a %d %b')"
+    sleep $((60 - $(date +%S | sed 's/^0//')))
+done

@@ -1,0 +1,60 @@
+# An example ~/.config/retro/retro.toml: a theme, the instruments moved and added to, and plugin sources.
+# It uses the sources and the face beside it; install them first:
+#
+#   install -m 755 sources/* ~/.config/retro/sources/
+#   install -m 755 faces/* ~/.config/retro/faces/
+#
+# Everything here is optional, and wins over the theme's own. retro-wall --list shows what there is.
+
+theme = "phosphor"          # or the path of a theme directory: themes/teal here
+
+# The instruments, in groups. Each group stands at an anchor (under-title, top-left, top-right,
+# bottom-left, bottom-right, or status for the status line) and runs as a row or a column.
+[[group]]                   # the machine's own, as a row under the hostname
+anchor = "under-title"
+widgets = ["cpu", "ram", "deck"]
+
+[[group]]                   # moved: swap and the graphics card, down the right side
+anchor = "top-right"
+direction = "column"
+widgets = ["swap-ring", "gpu"]
+
+[[group]]                   # the time and the news, along the bottom left
+anchor = "bottom-left"
+widgets = ["clock", "news"]
+
+[[group]]
+anchor = "status"
+widgets = ["status"]
+
+[widget.swap-ring]          # a built-in source in another widget type
+type = "ring"
+source = "swap"
+label = "SWAP"
+
+[widget.gpu]                # a plugin source (sources/gpu-temp) in a face of your own (faces/level)
+type = "level"
+source = "gpu-temp"
+label = "GPU °C"
+
+[widget.clock]              # sources/clock: a streaming source of text
+type = "ticker"
+source = "clock"
+label = "TIME"
+speed = 20.0
+
+[widget.news]
+type = "ticker"
+source = "headlines"
+label = "NEWS"
+
+# A source with arguments, or another pace, is a table. This one replaces sources/headlines' own pace
+# (every 2 seconds) with every ten minutes, and names its feed.
+[source.headlines]
+command = ["~/.config/retro/sources/headlines", "https://feeds.bbci.co.uk/news/world/rss.xml"]
+every = 600.0
+
+# A source needs no file of its own: a shell line will do.
+[source.users]
+command = "who | wc -l"
+every = 30.0

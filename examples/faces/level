@@ -1,0 +1,31 @@
+#!/bin/sh
+# level: an instrument that shows its reading as a column filling from the bottom, with the value under
+# it. A face keeps running: it reads a request a line (JSON) and answers each with a line, a list of
+# drawing operations. The request and the operations are in EXTENDING.md, under "An instrument".
+#
+#   install -m 755 level ~/.config/retro/faces/level
+#
+# then a widget of type "level" in retro.toml (see retro.toml here). Try it by hand:
+#   echo '{"width": 120, "height": 120, "value": 40}' | ./level
+
+# a number from the request, by its key
+field() { printf '%s\n' "$1" | sed -n "s/.*\"$2\": *\([-0-9.eE+]*\).*/\1/p" | head -n 1; }
+# a colour from the request's "colours", by its role
+colour() { printf '%s\n' "$1" | sed -n "s/.*\"$2\": *\"\(#[0-9a-fA-F]*\)\".*/\1/p" | head -n 1; }
+
+while read -r request; do
+    w=$(field "$request" width)
+    h=$(field "$request" height)
+    v=$(field "$request" value)
+    needle=$(colour "$request" needle)
+    lines=$(colour "$request" lines)
+    awk -v n="${needle:-#ff4fb0}" -v l="${lines:-#4fb6d6}" -v w="${w:-100}" -v h="${h:-100}" -v v="${v:-0}" 'BEGIN {
+        pad = int(w / 8); top = pad; bottom = h - 2.2 * pad; tall = bottom - top
+        x = w / 2 - pad; cw = 2 * pad; fill = tall * v / 100
+        printf "[{\"op\": \"rect\", \"x\": %d, \"y\": %d, \"w\": %d, \"h\": %d}, ", x, top, cw, tall
+        printf "{\"op\": \"stroke\", \"colour\": \"%s\", \"width\": 1}, ", l
+        printf "{\"op\": \"rect\", \"x\": %d, \"y\": %.1f, \"w\": %d, \"h\": %.1f}, ", x, bottom - fill, cw, fill
+        printf "{\"op\": \"fill\", \"colour\": \"%sc0\"}, {\"op\": \"glow\"}, ", n
+        printf "{\"op\": \"text\", \"text\": \"%d%%\", \"x\": %d, \"y\": %d, \"align\": \"centre\", \"bold\": true}]\n", v, w / 2, h - pad / 2
+    }'
+done
