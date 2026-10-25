@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+# Install retro-wall's live wallpaper for the user running it, on macOS.
+#
+#   macos/install [OPTION]...
+#
+# Run it as yourself. The OPTIONs are retro-wall's own (see retro-wall --help), for example
+# macos/install --theme winter --battery --all-monitors. It:
+#
+#   1. takes retro-wall from beside this script's directory (a release archive: retro-wall, themes/,
+#      macos/), or from a source checkout's target/release, built with cargo first if cargo is there
+#   2. copies it and the themes to ~/Library/Application Support/retro-wall
+#   3. writes the LaunchAgent ~/Library/LaunchAgents/io.github.pacanimal.retro-wall.plist, which starts
+#      it with the OPTIONs at every login and starts it again if it stops
+#   4. saves the desktop pictures as they are (the first time only), for macos/uninstall to put back,
+#      and (re)starts retro-wall now
+#
+# Re-running it is how you update, or change the options: it installs this copy and restarts it.
+# Log: ~/Library/Logs/retro-wall.log.
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+share="${HOME}/Library/Application Support/retro-wall"
+label="io.github.pacanimal.retro-wall"
+plist="${HOME}/Library/LaunchAgents/${label}.plist"
+log="${HOME}/Library/Logs/retro-wall.log"
+domain="gui/$(id -u)"
+
+say() { printf 'retro-wall: %s\n' "$*"; }
+die() { printf 'retro-wall: %s\n' "$*" >&2; exit 1; }
+
+[[ $EUID -ne 0 ]] || die "run this as the desktop's user, not as root: it installs into your home"
+[[ $(uname -s) == Darwin ]] || die "this is the macOS installer"
+
+# --- 1. the program ------------------------------------------------------------------------------------
+
+if [[ -f $here/Cargo.toml ]]; then
+	if command -v cargo >/dev/null; then
+		say "building it: cargo build --release"
+		(cd "$here" && cargo build --release)
+	fi
+	binary="$here/target/release/retro-wall"
+	[[ -x $binary ]] || die "no retro-wall built, and no cargo to build it: install Rust, or use a release archive"
+else
+	binary="$here/retro-wall"
+	[[ -x $binary ]] || die "no retro-wall beside $here/macos"
+fi
+[[ -d $here/themes ]] || die "no themes directory in $here"
+
+# --- 2. installed ---------------------------------------------------------------------------------------
+
+mkdir -p "$share" "$(dirname "$plist")" "$(dirname "$log")"
+install -m 755 "$binary" "$share/retro-wall.new"
+mv -f "$share/retro-wall.new" "$share/retro-wall"
+rm -rf "$share/themes"
+cp -R "$here/themes" "$share/themes"
+xattr -dr com.apple.quarantine "$share" 2>/dev/null || :   # downloaded: Gatekeeper would stop it
+say "installed retro-wall and the themes in $share"
+
+# --- 3. at login ----------------------------------------------------------------------------------------
+
+xml() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
+{
+	cat <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>${label}</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>$(xml "$share/retro-wall")</string>
+EOF
+	for arg in "$@"; do printf '\t\t<string>%s</string>\n' "$(xml "$arg")"; done
+	cat <<EOF
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<key>ThrottleInterval</key>
+	<integer>10</integer>
+	<key>ProcessType</key>
+	<string>Interactive</string>
+	<key>StandardOutPath</key>
+	<string>$(xml "$log")</string>
+	<key>StandardErrorPath</key>
+	<string>$(xml "$log")</string>
+</dict>
+</plist>
+EOF
+} >"$plist.new"
+plutil -lint -s "$plist.new" || die "the LaunchAgent written is not a valid property list"
+mv -f "$plist.new" "$plist"
+say "retro-wall starts at login: $plist"
+
+# --- 4. now ---------------------------------------------------------------------------------------------
+
+[[ -e $share/desktop-before ]] || "$share/retro-wall" --desktop save "$share/desktop-before"
+
+if launchctl print "$domain/$label" >/dev/null 2>&1; then
+	launchctl bootout "$domain/$label" 2>/dev/null || :
+	for _ in $(seq 50); do launchctl print "$domain/$label" >/dev/null 2>&1 || break; sleep 0.1; done
+fi
+: >"$log"
+launchctl bootstrap "$domain" "$plist" || die "launchctl did not take the LaunchAgent (is this a desktop session of yours?)"
+sleep 3
+if launchctl print "$domain/$label" 2>/dev/null | grep -q "state = running"; then
+	say "retro-wall is running (log: $log)"
+elif grep -q "software OpenGL" "$log" 2>/dev/null; then
+	say "this Mac has no hardware OpenGL, so it shows no live wallpaper (see the README, --software)"
+else
+	die "retro-wall did not stay up: $(tail -5 "$log")"
+fi
