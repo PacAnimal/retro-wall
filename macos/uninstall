@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Remove retro-wall's live wallpaper for the user running it, on macOS.
+#
+#   macos/uninstall
+#
+# Stops retro-wall, removes its LaunchAgent, puts the desktop pictures back as they were before the
+# first install, and removes the program, the themes, the pictures it drew, its log and its cache.
+# Your own settings in ~/.config/retro stay.
+set -euo pipefail
+
+share="${HOME}/Library/Application Support/retro-wall"
+label="io.github.pacanimal.retro-wall"
+plist="${HOME}/Library/LaunchAgents/${label}.plist"
+log="${HOME}/Library/Logs/retro-wall.log"
+domain="gui/$(id -u)"
+cache="${HOME}/.cache/retro-wall"
+if [[ ${XDG_CACHE_HOME:-} == /* ]]; then cache="$XDG_CACHE_HOME/retro-wall"; fi
+
+say() { printf 'retro-wall: %s\n' "$*"; }
+die() { printf 'retro-wall: %s\n' "$*" >&2; exit 1; }
+
+[[ $# -eq 0 ]] || { sed -n '4p' "$0" | sed 's/^# *//' >&2; exit 2; }
+[[ $(uname -s) == Darwin ]] || die "this is the macOS uninstaller"
+[[ ! -e $share/desktop-before || -x $share/retro-wall ]] ||
+	die "no retro-wall in $share to put the desktop pictures back with"
+
+if launchctl print "$domain/$label" >/dev/null 2>&1; then
+	launchctl bootout "$domain/$label" 2>/dev/null || :
+	for _ in $(seq 50); do launchctl print "$domain/$label" >/dev/null 2>&1 || break; sleep 0.1; done
+	say "stopped retro-wall"
+fi
+rm -f "$plist"
+
+if [[ -e $share/desktop-before ]]; then
+	"$share/retro-wall" --desktop restore "$share/desktop-before"
+	say "the desktop pictures are back as they were before installing"
+fi
+
+rm -rf "$share" "$cache"
+rm -f "$log"
+say "removed"
