@@ -1,0 +1,205 @@
+#!/usr/bin/env bash
+# The Linux install test, as the user, on a virtual X server with a desktop:
+#
+#   1. the user's own wallpaper (magenta.png) on the screen; their files and the desktop's wallpaper
+#      settings recorded
+#   2. linux/install: retro-wall comes up once, starts at login, takes the user's config (a theme, and
+#      the example plugins) without a complaint, and moves on the screen; stopped, the desktop shows
+#      the still picture
+#   3. linux/install again, as an update: one retro-wall, moving again
+#   4. linux/uninstall: no retro-wall, the user's wallpaper on the screen, files and settings as in 1
+#
+#   tests/linux/session [xfce|kde|gnome|cinnamon|mate|lxde]
+#
+# tests/linux/container runs it in a fresh container. With RETRO_SHOTS set to a directory, the screen
+# dumps and logs are left there. Exit status: 0 passed, 1 failed, 2 could not run.
+set -uo pipefail
+
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+desktop=${1:-xfce}
+case $desktop in
+	xfce) word=XFCE ;;
+	kde) word=KDE ;;
+	gnome) word=GNOME ;;
+	cinnamon) word=X-Cinnamon ;;
+	mate) word=MATE ;;
+	lxde) word=LXDE ;;
+	*) echo "session: no desktop $desktop" >&2; exit 2 ;;
+esac
+work=$(mktemp -d)
+
+Xvfb -displayfd 3 -screen 0 1280x720x24 -nolisten tcp +extension GLX 3>"$work/display" >"$work/xvfb.log" 2>&1 &
+xvfb=$!
+trap 'kill $xvfb 2>/dev/null; rm -rf "$work"' EXIT
+for _ in $(seq 100); do [[ -s $work/display ]] && break; sleep 0.1; done
+[[ -s $work/display ]] || { echo "session: Xvfb did not start" >&2; cat "$work/xvfb.log" >&2; exit 2; }
+DISPLAY=":$(cat "$work/display")"
+export DISPLAY XDG_CURRENT_DESKTOP=$word XDG_SESSION_TYPE=x11
+export XDG_RUNTIME_DIR=$work/runtime
+mkdir -m 700 "$XDG_RUNTIME_DIR"
+
+dbus-run-session -- bash -s "$here" "$work" "$desktop" <<'SESSION'
+set -uo pipefail
+here=$1 work=$2 desktop=$3
+share=$HOME/.local/share/retro
+failed=0
+
+pass() { echo "PASS  $1"; }
+fail() { echo "FAIL  $1"; failed=1; }
+check() { local what=$1; shift; if "$@" >/dev/null 2>&1; then pass "$what"; else fail "$what"; fi; }
+ours() { pgrep -u "$(id -u)" -f "^$share/retro-wall( |\$)"; }
+count() { ours | wc -l; }
+dump() { xwd -root -silent >"$work/$1.xwd"; }
+until_true() { for _ in $(seq 150); do "$@" >/dev/null 2>&1 && return 0; sleep 0.2; done; return 1; }
+wm_up() { xprop -root _NET_SUPPORTING_WM_CHECK | grep -q 'window id'; }
+gs() { gsettings set "$@"; }
+
+mine=$HOME/Pictures/mine.png
+mkdir -p "$(dirname "$mine")"
+cp "$here/tests/linux/magenta.png" "$mine"
+
+# --- the desktop: started its own way, the user's wallpaper set, and how to read its settings
+case $desktop in
+	xfce)
+		xfwm4 >"$work/wm.log" 2>&1 &
+		xfdesktop >"$work/desktop.log" 2>&1 &
+		until_true bash -c "$(declare -f wm_up); wm_up && pgrep -x xfdesktop"
+		sleep 2
+		for p in last-image:string:"$mine" image-style:int:3; do
+			IFS=: read -r key type value <<<"$p"
+			xfconf-query -c xfce4-desktop -p "/backdrop/screen0/monitorscreen/workspace0/$key" --create -t "$type" -s "$value"
+		done
+		settings() { xfconf-query -c xfce4-desktop -lv | sort; } ;;
+	lxde)
+		openbox >"$work/wm.log" 2>&1 &
+		pcmanfm --desktop --profile LXDE >"$work/desktop.log" 2>&1 &
+		until_true bash -c "$(declare -f wm_up); wm_up && pgrep -x pcmanfm"
+		sleep 3
+		pcmanfm --set-wallpaper="$mine" --wallpaper-mode=stretch
+		settings() { cat "$HOME"/.config/pcmanfm/LXDE/desktop-items-*.conf 2>/dev/null; } ;;
+	mate)
+		gs org.mate.background show-desktop-icons true
+		marco >"$work/wm.log" 2>&1 &
+		caja -n --force-desktop >"$work/desktop.log" 2>&1 &
+		until_true bash -c "$(declare -f wm_up); wm_up && pgrep -x caja"
+		sleep 3
+		gs org.mate.background picture-options stretched
+		gs org.mate.background picture-filename "$mine"
+		settings() { gsettings list-recursively org.mate.background | sort; } ;;
+	gnome)
+		gnome-shell --x11 --replace >"$work/desktop.log" 2>&1 &
+		until_true wm_up
+		sleep 8
+		xdotool key Escape          # out of the overview it starts in
+		gs org.gnome.desktop.background picture-options stretched
+		gs org.gnome.desktop.background picture-uri "file://$mine"
+		gs org.gnome.desktop.background picture-uri-dark "file://$mine"
+		settings() { gsettings list-recursively org.gnome.desktop.background | sort; } ;;
+	cinnamon)
+		gs org.cinnamon.desktop.background picture-options stretched
+		gs org.cinnamon.desktop.background picture-uri "file://$mine"
+		cinnamon-session >"$work/desktop.log" 2>&1 &   # its settings daemon draws the wallpaper
+		until_true bash -c "$(declare -f wm_up); wm_up && xprop -root _XROOTPMAP_ID | grep -q pixmap"
+		sleep 8
+		settings() { gsettings list-recursively org.cinnamon.desktop.background | sort; } ;;
+	kde)
+		kwin_x11 >"$work/wm.log" 2>&1 &
+		plasmashell >"$work/desktop.log" 2>&1 &
+		plasma() {
+			dbus-send --session --print-reply=literal --dest=org.kde.plasmashell /PlasmaShell \
+				org.kde.PlasmaShell.evaluateScript "string:$1"
+		}
+		until_true bash -c "$(declare -f wm_up plasma); wm_up && plasma 'print(1)'"
+		sleep 8
+		plasma "desktops().forEach(function (d) { d.wallpaperPlugin = 'org.kde.image';
+			d.currentConfigGroup = ['Wallpaper', 'org.kde.image', 'General'];
+			d.writeConfig('Image', 'file://$mine'); d.writeConfig('FillMode', 0); })"
+		settings() {
+			plasma "desktops().forEach(function (d) { d.currentConfigGroup = ['Wallpaper', 'org.kde.image', 'General'];
+				print(d.wallpaperPlugin + ' ' + d.readConfig('Image') + ' ' + d.readConfig('FillMode') + '\n'); })"
+		} ;;
+esac
+sleep 3
+echo "--- $desktop on $DISPLAY"
+
+# the user's options (animate on software GL) and config: a theme, and the example plugins
+conf=$HOME/.config/retro
+mkdir -p "$conf/sources" "$conf/faces"
+echo "$DISPLAY  --software --demo" >"$conf/retro-wall.conf"
+cp "$here"/examples/sources/* "$conf/sources/"
+cp "$here"/examples/faces/* "$conf/faces/"
+{ echo 'theme = "night_city"'; grep -v '^theme' "$here/examples/retro.toml"; } >"$conf/retro.toml"
+
+# the user's files (not what the session itself keeps writing) and the desktop's wallpaper settings
+record() {
+	(
+		cd "$HOME" || exit
+		find . \( -path ./.cache -o -path ./.dbus -o -path ./.local/state -o -path ./.local/share/xorg \
+			-o -path ./.config/xfce4 -o -path ./.config/dconf -o -path ./.config/pulse -o -path ./.config/caja \
+			-o -path ./.config/mate -o -path ./.config/libfm -o -path ./.config/openbox -o -path ./.config/menus \
+			-o -path ./.cinnamon -o -path ./.config/cinnamon -o -path ./.local/share/cinnamon \
+			-o -path ./.local/share/gnome-shell -o -path ./.config/goa-1.0 -o -path ./.local/share/gvfs-metadata \
+			-o -path ./.local/share/recently-used.xbel -o -path './.config/k*' -o -path './.config/plasma*' \
+			-o -path './.local/share/k*' -o -path './.local/share/plasma*' -o -path ./.local/share/baloo \
+			-o -path ./.config/Trolltech.conf \) -prune -o -print0 | sort -z |
+			while IFS= read -r -d '' f; do
+				if [[ -f $f ]]; then
+					printf '%s %s %s\n' "$f" "$(stat -c '%a %s' "$f")" "$(cksum <"$f" | cut -d' ' -f1)"
+				else
+					printf '%s %s\n' "$f" "$(stat -c '%F %a' "$f")"
+				fi
+			done
+	)
+	echo "--- wallpaper settings"
+	settings
+}
+record >"$work/before"
+dump mine-before
+
+echo "--- install"
+if "$here/linux/install"; then pass "install"; else fail "install"; fi
+sleep 8
+check "retro-wall running, once" test "$(count)" -eq 1
+check "animating, not the still picture only" bash -c "! grep -q 'not animating' '$share/retro-wall.log'"
+check "starts at login" test -f "$HOME/.config/autostart/retro-wall.desktop"
+check "the user's config taken, nothing refused" bash -c "! grep -E 'left out|^config:|^theme:|^widget |^layout:|panicked' '$share/retro-wall.log'"
+dump live-1; sleep 1; dump live-2
+pkill -u "$(id -u)" -f "^$share/retro-wall( |\$)"   # stopped: the desktop's own picture shows
+sleep 3
+dump still
+
+echo "--- install again"
+if "$here/linux/install" --no-packages; then pass "install again"; else fail "install again"; fi
+sleep 8
+check "retro-wall running, once" test "$(count)" -eq 1
+dump again-1; sleep 1; dump again-2
+[[ $failed == 0 ]] || { echo "--- retro-wall.log"; cat "$share/retro-wall.log"; }
+cp "$(ls -t "$share"/wallpaper-*.png | head -n 1)" "$work/picture.png"
+
+echo "--- uninstall"
+if "$here/linux/uninstall"; then pass "uninstall"; else fail "uninstall"; fi
+sleep 3
+check "retro-wall stopped" test "$(count)" -eq 0
+check "its cache removed" test ! -e "$HOME/.cache/retro-wall"
+dump mine-after
+record >"$work/after"
+if diff -u "$work/before" "$work/after"; then
+	pass "nothing left: files and wallpaper settings as before"
+else
+	fail "something left (the diff above)"
+fi
+
+screen() { "$here/screen" "$@"; }
+over() { awk -v a="$1" -v b="$2" 'BEGIN { exit !(a >= b) }'; }
+v=$(screen near "$work/mine-before.xwd" '#ff00ff'); check "before: the user's wallpaper shown ($v of the screen)" over "$v" 0.6
+v=$(screen near "$work/live-1.xwd" '#ff00ff'); check "installed: the user's wallpaper gone ($v left)" over 0.02 "$v"
+v=$(screen differ "$work/live-1.xwd" "$work/live-2.xwd"); check "installed: moving over the desktop ($v in a second)" over "$v" 0.0005
+v=$(screen like "$work/still.xwd" "$work/picture.png"); check "stopped: the desktop shows the still picture ($v)" over "$v" 0.6
+v=$(screen differ "$work/again-1.xwd" "$work/again-2.xwd"); check "updated: moving again ($v in a second)" over "$v" 0.0005
+v=$(screen near "$work/mine-after.xwd" '#ff00ff'); check "uninstalled: the user's wallpaper back ($v)" over "$v" 0.6
+[[ -z ${RETRO_SHOTS:-} ]] || cp "$work"/*.xwd "$work"/*.log "$work/picture.png" "$RETRO_SHOTS/" 2>/dev/null
+exit $failed
+SESSION
+rc=$?
+if [[ $rc == 0 ]]; then echo "session ($desktop): all passed"; else echo "session ($desktop): FAILED"; fi
+exit $rc
