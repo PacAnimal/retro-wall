@@ -1,0 +1,81 @@
+#!/bin/sh
+# The Linux install test, from a bare distribution image, as root in a throwaway container:
+#
+#   docker run --rm -v "$PWD:/src:ro" debian:trixie /src/tests/linux/container [DESKTOP]
+#
+# from a checkout with retro-wall and the screen tool built: cargo build --release, and cargo build
+# --release --example screen (or the two programs put at the top of the checkout).
+#
+# It installs a desktop (XFCE if none is named; KDE, GNOME, Cinnamon, MATE or LXDE on Debian), a
+# virtual X server and xwd, and none of what retro-wall itself needs, which the installer must bring.
+# Then it runs tests/linux/session as an ordinary user with sudo, as someone installing it on their
+# own desktop would. XFCE is tested on Debian, Ubuntu, Fedora and Arch.
+#
+# Exit status: 0 passed, 1 failed, 2 could not run.
+set -eu
+
+src=$(cd "$(dirname "$0")/../.." && pwd)
+desktop=${1:-xfce}
+
+say() { printf 'container: %s\n' "$*"; }
+
+# what the test runs: the program, the screen tool, and the files the installer copies
+binary=$src/target/release/retro-wall
+[ -x "$binary" ] || binary=$src/retro-wall
+screen=$src/target/release/examples/screen
+[ -x "$screen" ] || screen=$src/screen
+for f in "$binary" "$screen"; do
+	[ -x "$f" ] || { say "not built: $f"; exit 2; }
+done
+
+if command -v apt-get >/dev/null; then
+	case $desktop in
+		xfce) pkgs="xfdesktop4 xfwm4 xfconf" ;;
+		kde) pkgs="plasma-workspace plasma-desktop kwin-x11" ;;
+		gnome) pkgs="gnome-shell gnome-settings-daemon xdotool" ;;
+		cinnamon) pkgs="cinnamon cinnamon-session" ;;
+		mate) pkgs="caja marco mate-desktop-common" ;;
+		lxde) pkgs="pcmanfm openbox" ;;
+		*) say "no desktop $desktop (xfce, kde, gnome, cinnamon, mate, lxde)"; exit 2 ;;
+	esac
+	export DEBIAN_FRONTEND=noninteractive
+	apt-get update -qq
+	# shellcheck disable=SC2086
+	apt-get install -y -qq --no-install-recommends $pkgs xvfb x11-apps x11-utils dbus dbus-x11 \
+		libgl1-mesa-dri libglib2.0-bin sudo procps ca-certificates >/dev/null
+elif [ "$desktop" != xfce ]; then
+	say "$desktop is tested on Debian only"
+	exit 2
+elif command -v dnf >/dev/null; then
+	dnf install -y -q xorg-x11-server-Xvfb xwd xprop xfdesktop xfwm4 xfconf dbus-daemon dbus-x11 \
+		mesa-dri-drivers sudo procps-ng >/dev/null
+elif command -v pacman >/dev/null; then
+	pacman -Syu --noconfirm --needed -q xorg-server-xvfb xorg-xwd xorg-xprop xfdesktop xfwm4 xfconf dbus \
+		mesa sudo procps-ng diffutils >/dev/null
+else
+	say "no apt-get, dnf or pacman"
+	exit 2
+fi
+
+# the system bus, and logind where there is one: GNOME's shell draws no desktop without it
+mkdir -p /run/dbus
+dbus-daemon --system --fork
+if [ -x /usr/lib/systemd/systemd-logind ]; then
+	mkdir -p /run/systemd
+	/usr/lib/systemd/systemd-logind >/dev/null 2>&1 &
+fi
+
+useradd -m -s /bin/bash tester
+echo 'tester ALL=(ALL) NOPASSWD: ALL' >/etc/sudoers.d/tester
+chmod 440 /etc/sudoers.d/tester
+
+# the user's own copy, laid out as a release archive is, outside the home the test compares
+copy=/opt/retro-wall
+mkdir -p "$copy/tests"
+cp "$binary" "$copy/retro-wall"
+cp "$screen" "$copy/screen"
+cp -R "$src/themes" "$src/linux" "$src/examples" "$copy/"
+cp -R "$src/tests/linux" "$copy/tests/"
+chown -R tester:tester "$copy"
+if [ -n "${RETRO_SHOTS:-}" ]; then mkdir -p "$RETRO_SHOTS" && chown tester "$RETRO_SHOTS"; fi
+exec sudo -u tester -H RETRO_SHOTS="${RETRO_SHOTS:-}" "$copy/tests/linux/session" "$desktop"
