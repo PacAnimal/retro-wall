@@ -1,0 +1,8 @@
+#!/bin/sh
+# cargo in the rwall-win image (docker build -t rwall-win ci/windows) on the current directory, for
+# x86_64-pc-windows-gnu. Output: target/x86_64-pc-windows-gnu/PROFILE/retro-wall.exe.
+#
+#   ci/windows/cargo build --release
+[ $# -ge 1 ] || exec docker run --rm rwall-win cargo
+sub=$1; shift
+exec docker run --rm -v "$PWD":/src -w /src rwall-win cargo "$sub" --target x86_64-pc-windows-gnu "$@"
