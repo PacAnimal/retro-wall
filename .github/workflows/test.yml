@@ -1,0 +1,199 @@
+# Lint and test on Linux; check the dependencies, and the build on the oldest Rust it supports; build
+# for macOS and Windows and run the Windows exe; install and uninstall in containers of the Linux
+# desktops. Nightly, the limit tests run every case (RETRO_TEST_FULL).
+name: test
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      - name: Libraries
+        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends libcairo2-dev
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - run: cargo fmt --check
+      - run: cargo clippy --release --all-targets -- -D warnings
+
+  # the dependencies' licences, advisories, duplicates and sources, as deny.toml says
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check advisories bans licenses sources
+
+  # it builds on the oldest Rust it says it does: rust-version in Cargo.toml
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: "1.88"
+      - run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends libcairo2-dev
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: The toolchain is the rust-version
+        run: test "$(rustc --version | cut -d' ' -f2 | cut -d. -f1,2)" = "$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml)"
+      - run: cargo build --locked --all-targets
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+      - name: Libraries, Xvfb and Mesa's software GL
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends libcairo2-dev xvfb libgl1-mesa-dri libgl1 \
+            libx11-6 libxext6 libxfixes3 libxrandr2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - run: cargo build --release --all-targets
+      - name: Tests
+        env:
+          RETRO_REQUIRE_XVFB: "1"
+          RETRO_TEST_FULL: ${{ github.event_name == 'schedule' && '1' || '' }}
+        run: cargo test --release --no-fail-fast
+      - name: The snapshots that differed
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: snapshots
+          path: /tmp/retro-wall-x-*/*.png
+          if-no-files-found: ignore
+
+  linux-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+      - run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends libcairo2-dev
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - run: cargo build --release && cargo build --release --example screen
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-programs
+          path: |
+            target/release/retro-wall
+            target/release/examples/screen
+
+  linux-install:
+    needs: linux-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { image: "debian:trixie", desktop: xfce }
+          - { image: "ubuntu:24.04", desktop: xfce }
+          - { image: "fedora:latest", desktop: xfce }
+          - { image: "archlinux:latest", desktop: xfce }
+          - { image: "debian:trixie", desktop: kde }
+          - { image: "debian:trixie", desktop: gnome }
+          - { image: "debian:trixie", desktop: cinnamon }
+          - { image: "debian:trixie", desktop: mate }
+          - { image: "debian:trixie", desktop: lxde }
+    name: install (${{ matrix.desktop }}, ${{ matrix.image }})
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: linux-programs
+          path: target/release
+      - run: chmod 755 target/release/retro-wall target/release/examples/screen
+      - name: Install, update and uninstall
+        run: |
+          mkdir -p "$RUNNER_TEMP/shots"
+          docker run --rm -v "$PWD:/src:ro" -v "$RUNNER_TEMP/shots:/shots" -e RETRO_SHOTS=/shots \
+            "${{ matrix.image }}" /src/tests/linux/container "${{ matrix.desktop }}"
+      - name: The screen dumps
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: install-${{ matrix.desktop }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/shots
+          if-no-files-found: ignore
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+      - name: Build tools
+        run: brew install meson ninja pkgconf
+      - name: The static cairo, kept between runs
+        id: cairo
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/cairo-static
+          key: cairo-static-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ci/macos/build-cairo-static') }}
+      - if: steps.cairo.outputs.cache-hit != 'true'
+        run: ci/macos/build-cairo-static ~/cairo-static
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - run: ci/macos/cargo build --release --all-targets
+      - run: ci/macos/cargo clippy --release --all-targets -- -D warnings
+      - name: Tests (the X11 and /proc ones are Linux only)
+        run: ci/macos/cargo test --release --no-fail-fast
+      - name: Links nothing outside macOS
+        run: |
+          otool -L target/release/retro-wall
+          ! otool -L target/release/retro-wall | tail -n +2 | grep -v -e '^\s*/usr/lib/' -e '^\s*/System/Library/'
+      - run: target/release/retro-wall --version
+
+  windows-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: The cross-building image
+        run: docker build -t rwall-win ci/windows
+      - run: ci/windows/cargo build --release
+      - name: The tests build for Windows too (they run on Linux and macOS)
+        run: ci/windows/cargo test --release --no-run
+      - run: ci/windows/cargo clippy --release --all-targets -- -D warnings
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-exe
+          path: target/x86_64-pc-windows-gnu/release/retro-wall.exe
+
+  windows-run:
+    needs: windows-build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: windows-exe
+      - name: It runs, and needs no DLL of its own
+        shell: pwsh
+        run: |
+          # a GUI program: PowerShell waits for it, and sees its output, only through Start-Process
+          $out = Join-Path $env:RUNNER_TEMP version.txt
+          $p = Start-Process -FilePath .\retro-wall.exe -ArgumentList --version -Wait -PassThru -NoNewWindow -RedirectStandardOutput $out
+          if ($p.ExitCode -ne 0) { throw "retro-wall.exe --version failed: $($p.ExitCode)" }
+          $v = (Get-Content $out -Raw).Trim()
+          Write-Output $v
+          if ($v -notmatch '^retro-wall \d') { throw "unexpected: $v" }

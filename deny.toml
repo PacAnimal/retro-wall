@@ -1,0 +1,35 @@
+# cargo deny check: the dependencies' licences, advisories, duplicates and where they come from
+
+[graph]
+all-features = true
+
+[advisories]
+# every advisory fails the check, unmaintained crates and yanked versions too
+unmaintained = "all"
+yanked = "deny"
+
+[licenses]
+# licences that sit with the MIT licence of the program
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-3-Clause",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

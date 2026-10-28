@@ -1,0 +1,9 @@
+#!/bin/zsh
+# cargo against the static cairo that build-cairo-static made, so the binary needs no Homebrew.
+#
+#   CAIRO_STATIC=PREFIX ci/macos/cargo build --release        (PREFIX by default ~/cairo-static)
+: ${CAIRO_STATIC:=$HOME/cairo-static}
+[[ -f $CAIRO_STATIC/lib/pkgconfig/cairo.pc ]] || { echo "no static cairo in $CAIRO_STATIC: run build-cairo-static"; exit 1; }
+export PKG_CONFIG_LIBDIR=$CAIRO_STATIC/lib/pkgconfig PKG_CONFIG_PATH= SYSTEM_DEPS_LINK=static
+: ${MACOSX_DEPLOYMENT_TARGET:=11.0}; export MACOSX_DEPLOYMENT_TARGET
+exec cargo "$@"

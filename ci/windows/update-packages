@@ -1,0 +1,25 @@
+#!/bin/sh
+# Write packages.lock again from the current MSYS2 mingw64 repository: its database's signature checked
+# against msys2.gpg, then each package's file name and sha256. Run it when the image will not build
+# because Arch's mingw-w64 gcc and MSYS2's differ, then build the image again.
+set -eu
+here=$(cd "$(dirname "$0")" && pwd)
+repo=https://repo.msys2.org/mingw/mingw64
+# the runtime MSYS2 builds its libraries against, then the cairo stack
+pkgs="crt headers winpthreads gcc cairo pixman libpng zlib freetype fontconfig expat harfbuzz graphite2 brotli bzip2 lzo2 gettext-runtime libiconv glib2 pcre2 libffi"
+t=$(mktemp -d); trap 'rm -rf "$t"' EXIT
+curl -sSf -o "$t/db" $repo/mingw64.db
+curl -sSf -o "$t/db.sig" $repo/mingw64.db.sig
+GNUPGHOME="$t/gpg"; export GNUPGHOME; mkdir -m 700 "$GNUPGHOME"
+gpg -q --import "$here/msys2.gpg" 2>/dev/null
+gpg -q --verify "$t/db.sig" "$t/db"
+mkdir "$t/x"; tar -C "$t/x" -xf "$t/db"
+: >"$t/lock"
+for p in $pkgs; do
+	d=$(ls -d "$t/x/mingw-w64-x86_64-$p"-[0-9]*)
+	f=$(awk '/^%FILENAME%/ { getline; print }' "$d/desc")
+	s=$(awk '/^%SHA256SUM%/ { getline; print }' "$d/desc")
+	echo "$s  $f" >>"$t/lock"
+done
+mv "$t/lock" "$here/packages.lock"
+cat "$here/packages.lock"

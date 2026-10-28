@@ -1,0 +1,93 @@
+# On a version tag (v1.2.3): build for Linux, macOS and Windows, and attach an archive for each to a
+# GitHub release: the program, the themes, that platform's installer, LICENSE and README.md.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # in Ubuntu 22.04, for its glibc (2.35): the binary runs there, on Debian 12 and on anything newer
+      - run: docker run --rm -v "$PWD:/src" -w /src ubuntu:22.04 ci/linux/build
+      - name: Archive
+        run: |
+          d="retro-wall-$GITHUB_REF_NAME-linux-x86_64"
+          mkdir -p "$d/linux"
+          sudo chown -R "$(id -u)" target
+          cp target/release/retro-wall "$d/"
+          cp -R themes LICENSE README.md "$d/"
+          cp linux/install linux/uninstall "$d/linux/"
+          tar czf "$d.tar.gz" "$d"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux
+          path: retro-wall-*.tar.gz
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+      - run: brew install meson ninja pkgconf
+      - run: ci/macos/build-cairo-static ~/cairo-static
+      - run: ci/macos/cargo build --release
+      - name: Archive
+        run: |
+          d="retro-wall-$GITHUB_REF_NAME-macos-arm64"
+          mkdir -p "$d"
+          cp target/release/retro-wall "$d/"
+          cp -R themes macos LICENSE README.md "$d/"
+          tar czf "$d.tar.gz" "$d"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos
+          path: retro-wall-*.tar.gz
+
+  windows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: docker build -t rwall-win ci/windows
+      - run: ci/windows/cargo build --release
+      - name: Archive
+        run: |
+          d="retro-wall-$GITHUB_REF_NAME-windows-x86_64"
+          mkdir -p "$d"
+          sudo chown -R "$(id -u)" target
+          cp target/x86_64-pc-windows-gnu/release/retro-wall.exe "$d/"
+          cp -R themes windows LICENSE README.md "$d/"
+          zip -qr "$d.zip" "$d"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows
+          path: retro-wall-*.zip
+
+  release:
+    needs: [linux, macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: archives
+          merge-multiple: true
+      - name: The release, with the archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -l archives
+          gh release create "$GITHUB_REF_NAME" archives/* --repo "$GITHUB_REPOSITORY" \
+            --title "retro-wall $GITHUB_REF_NAME" --generate-notes
