@@ -174,6 +174,12 @@ pub trait Widget {
     /// Its pictures added to `up`: its own kept, the shared sprites set in `sprites` if not yet.
     fn textures(&mut self, _th: &Theme, _up: &mut Uploads, _sprites: &mut SpriteTex) {}
     fn start(&mut self, _g: &Geo, _w: &World, _s: &Shared) {}
+    /// Whether it wants the picture under the instruments (a status line's glass).
+    fn under(&self, _th: &Theme) -> bool {
+        false
+    }
+    /// The picture under the instruments, the moving parts at rest, if it wanted it.
+    fn set_under(&mut self, _picture: &ImageSurface) {}
     /// Stop anything it keeps running.
     fn stop(&mut self) {}
     /// Update what it shows; returns a value that changes whenever that does.
@@ -276,6 +282,8 @@ struct Instruments {
     sprites: Sprites,
     verts: Vec<f32>,
     fps: f64,
+    /// Whether a widget wants the picture under it.
+    under: bool,
 }
 
 /// Its passes: cards, moving parts, covers, readouts.
@@ -330,7 +338,14 @@ impl Instruments {
             sprites: Default::default(),
             verts: vec![],
             fps: th.tw.fps,
+            under: false,
         }
+        .wanting(th)
+    }
+
+    fn wanting(mut self, th: &Theme) -> Self {
+        self.under = self.widgets.iter().any(|w| w.base().area.is_some() || !w.card()) && self.widgets.iter().any(|w| w.under(th));
+        self
     }
 
     /// Each card's box, outline, face, glowing lines, lettering and label.
@@ -427,6 +442,14 @@ impl Part for Instruments {
     }
     fn paint_pass(&mut self, k: u8, g: &Geo, c: &Context, _s: &mut Shared) {
         if k == 0 { self.paint_cards(g, c) } else { self.paint_covers(g, c) }
+    }
+    fn under(&self) -> bool {
+        self.under
+    }
+    fn set_under(&mut self, picture: &ImageSurface) {
+        for w in self.widgets.iter_mut() {
+            w.set_under(picture);
+        }
     }
     fn top(&self, g: &Geo) -> i32 {
         let cards = least(self.cards.iter().filter_map(|&i| self.widgets[i].base().area).map(|a| a.y));

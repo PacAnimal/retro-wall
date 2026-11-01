@@ -87,6 +87,8 @@ pub struct Power {
     /// The battery's charge, in percent.
     pub charge: f64,
     pub on_battery: bool,
+    /// Whether there is a battery at all.
+    pub battery: bool,
 }
 
 /// The display: one connection, many windows, each with a GL context (all sharing one another's

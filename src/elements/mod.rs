@@ -5,6 +5,7 @@ pub mod aurora;
 pub mod core;
 pub mod guybrush;
 pub mod instruments;
+pub mod machine;
 pub mod matrix;
 pub mod mountains;
 pub mod night_city;
@@ -75,6 +76,7 @@ fn registry() -> &'static [(Kind, Table)] {
         let mut v = vec![];
         v.extend(core::kinds());
         v.extend(painted::kinds());
+        v.extend(machine::kinds());
         v.extend(phosphor::kinds());
         v.extend(night_city::kinds());
         v.extend(mountains::kinds());

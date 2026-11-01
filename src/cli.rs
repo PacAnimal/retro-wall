@@ -307,7 +307,7 @@ const FACE: &str = r###"#!/bin/sh
 #
 #   [widget.mine]
 #   type = "NAME"
-#   source = "cpu"            # any source: cpu, ram, swap, bat, disk, used, free, or your own
+#   source = "cpu"            # any source: cpu, ram, swap, bat, disk, used, free, down, up, or your own
 #   label = "CPU"
 #   size = [1, 1]             # in cards: columns, rows
 #

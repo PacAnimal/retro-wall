@@ -1,0 +1,139 @@
+# copperworks: an alchemical engine of copper, brass and iron, painted, that runs on the machine's
+# readings. Its gears and valve wheels turn with the processor's load; three pressure gauges read the
+# processor, the disks' activity and the battery (swap where there is none); the round tank holds the
+# memory in use and the tall one the disk's space used; the vents steam with the network's traffic,
+# down and up; the amber lamps breathe, and flicker as the disks work.
+#
+# No code of its own: a painting, the moving parts laid over it, and the pipe in front of them. Every
+# part names its reading as `source`: set another (yours too, `retro-wall --list`), or "" for the
+# part's own idle motion. Places and sizes are in the pixels of a 3840 x 2160 canvas.
+name = "Copperworks"
+
+scene = ["plate", "tanks-teal", "tanks-violet", "gears", "gauges", "pipe", "lamps", "vents", "title", "instruments", "finish"]
+
+[[group]]                   # the network's status line, on glass, in the bottom right corner (status_corner)
+anchor = "status"
+widgets = ["status"]
+
+[palette]                   # the lettering in the engine's metals: polished brass to dark copper
+base = "#1a0d07"
+shadow = "#0d0604"
+deep = "#140904"            # the extrusion, far: the shadow between the pipes
+ramp = ["#3a1a0c", "#5a2a12", "#8a4a22", "#b8682e", "#d88a44", "#e9a95c"]
+title_top = "#fff0c8"       # the brass rims' highlight
+title_light = "#f2c27a"     # brass
+title_bottom = "#9a4a22"    # copper in shade
+glow = "#ffb466"
+caption = "#f2c27a"
+bracket = "#5a2a12"
+ridge = "#e9a95c"
+
+[tweaks]
+canvas = [1920.0, 1080.0]          # the painting (backplate.png): what everything covers the screen as
+canvas_source = [3840.0, 2160.0]   # the canvas the parts are placed on
+canvas_scale = [0.5, 0.5]
+crop_centre = [0.5, 0.25]          # a wider screen keeps the gauges at the top; a narrower one, the flywheel
+title_corner = "bottom-left"
+title_glow = [[8, 0.35]]
+title_shadow = [4.0, 6.0, 4.0, 1.4, "#000000"]   # a deep shadow: it reads over the pipes
+corner = 0.03
+rule = false
+ruler_end = 0.0
+vignette = 0.3
+status_zoom = 1.9
+status_colours = ["#ffe2b0", "#ffe2b0"]
+status_shadow = [0.0, 0.0, 1.0, 0.0, "#000000"]   # no shadow: the line stands on glass
+status_glass = [0.75, 0.5, 6.0, 0.55, 0.45, "#0b0604", "#f2c27a"]   # frosted dark glass, a pill, edged in brass
+status_corner = true               # set in from the bottom right as the hostname is from the bottom left
+
+[element.plate]             # the machine, still: pipes, rivets and the parts that do not move
+type = "painting"
+image = "backplate.png"
+
+[element.tanks-teal]        # the round reservoir: the memory in use
+type = "tank"
+mask = "mask_round.png"
+liquid = "teal.png"
+frame = "frame_round.png"
+glass = "glass_round.png"
+at = [600.0, 872.0]
+size = [490.0, 520.0]
+source = "ram"
+mean = 0.57                 # its idle swell, with no reading
+amplitude = 0.3
+period = 23.0
+phase = 0.3
+meniscus = "#92ffe4"
+bubble = "#c8fff4"
+
+[element.tanks-violet]      # the tall reservoir: the disk's space used
+type = "tank"
+mask = "mask_tall.png"
+liquid = "violet.png"
+frame = "frame_tall.png"
+glass = "glass_tall.png"
+at = [3225.0, 880.0]
+size = [710.0, 820.0]
+source = "used"
+mean = 0.55
+amplitude = 0.33
+period = 31.0
+phase = 2.1
+meniscus = "#eda6ff"
+bubble = "#f0d8ff"
+
+[element.gears]             # the flywheel, the drives and the valve wheels, each on its socket in the painting
+type = "rotors"             # slow at rest, quick under load
+source = "cpu"
+load = 4.0
+ease = 3.0
+rotors = [
+	{ image = "gear_copper.png", at = [1939, 891.5], size = [573, 573], speed = 5.0 },
+	{ image = "gear_iron.png", at = [1410.5, 1292.3], size = [332, 332], speed = -8.3, phase = 10 },
+	{ image = "gear_brass.png", at = [2490.3, 1227], size = [347, 347], speed = 6.25, phase = 5 },
+	{ image = "gear_iron.png", at = [2479.7, 462.8], size = [221, 221], speed = -11.0, phase = 7 },
+	{ image = "gear_brass.png", at = [1368.5, 458.5], size = [108, 108], speed = 14.0 },
+	{ image = "gear_copper.png", at = [1933.8, 1674.3], size = [160, 160], speed = -10.0, phase = 10 },
+	{ image = "valve.png", at = [614.2, 1523.6], size = [161, 161], speed = 1.1 },
+	{ image = "valve.png", at = [3224.5, 1566], size = [161, 161], speed = -0.8 },
+]
+
+[element.gauges]            # the pressure gauges: the processor, the disks' activity, the battery or swap
+type = "gauges"
+dial = "dial.png"
+needle = "needle.png"
+gauges = [
+	{ at = [970, 260], size = 170, phase = 0, source = "cpu" },
+	{ at = [1926, 455], size = 120, phase = 2, source = "disk" },
+	{ at = [3570, 205], size = 150, phase = 4, source = "bat|swap" },
+]
+
+[element.pipe]              # the pipe across the foot of the machine, in front of its moving parts
+type = "painting"
+image = ""
+steady = [{ image = "pipe_bridge.png", at = [1180, 1685] }]
+
+[element.lamps]             # the amber lamps, each in a round fitting of the painting: breathing, each in its
+type = "pilot-lamps"        # own time, flickering with the disks
+off = "lamp_off.png"
+lens = "lamp_emission.png"
+source = "disk"
+lamps = [
+	{ at = [339.5, 339.5], size = 84, period = 8, phase = 0 },
+	{ at = [1196.5, 1126.5], size = 91, period = 11, phase = 2 },
+	{ at = [2757, 1446], size = 100, period = 9, phase = 3 },
+	{ at = [3530.5, 239], size = 84, period = 10, phase = 2.4 },
+]
+
+[element.vents]             # the steam: the traffic coming in on the left and below, going out on the right
+type = "steam"
+vent = "vent.png"
+puffs = ["steam_plume.png", "steam_wisp.png"]
+vents = [
+	{ at = [1080, 655], size = [115, 155], plume = [300, 460], intensity = 0.8, phase = 0, source = "down" },
+	{ at = [2760, 760], size = [100, 150], plume = [260, 380], intensity = 0.65, phase = 0.9, source = "up" },
+	{ at = [2290, 1640], size = [85, 125], plume = [220, 350], intensity = 0.5, phase = 1.5, source = "down" },
+]
+
+[element.title]
+style = "solid"

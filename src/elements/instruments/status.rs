@@ -5,8 +5,8 @@ use super::draw::*;
 use super::{Base, Widget, WidgetType};
 use crate::config::{Anchor, Theme};
 use crate::gfx::{Blend, Gfx};
-use crate::scene::{Geo, GraphPlace, Net, Shared, World};
-use crate::tweaks::Colour;
+use crate::scene::{Geo, GraphPlace, Net, Piece, Shared, World};
+use crate::tweaks::{Colour, TitleCorner};
 use crate::util::*;
 use cairo::{Context, ImageSurface};
 use std::f64::consts::PI;
@@ -107,8 +107,10 @@ pub fn status_bottom(th: &Theme, w: i32, h: i32, zoom: f64, line: f64) -> f64 {
     a.y + a.h / 2.0 + cap / 2.0
 }
 
-fn status_surface(th: &Theme, w: i32, h: i32, scale: f64, online: bool, fields: &[(&str, Option<&str>)]) -> ImageSurface {
+/// The status line on transparency, right-aligned in w x h; and where its letters start.
+fn status_surface(th: &Theme, w: i32, h: i32, scale: f64, online: bool, fields: &[(&str, Option<&str>)]) -> (ImageSurface, f64) {
     let out = surface(w, h);
+    let left;
     {
         let c = ctx(&out);
         let (groups, widths) = status_groups(th, &c, scale, online, fields);
@@ -117,6 +119,7 @@ fn status_surface(th: &Theme, w: i32, h: i32, scale: f64, online: bool, fields: 
         let (key, _, bright) = status_colours(th);
         let base = (h as f64 / 2.0 + cap / 2.0).round();
         let mut x = w as f64 - widths.iter().sum::<f64>() - space * (groups.len() - 1) as f64;
+        left = x.round();
         for (g, gw) in groups.iter().zip(widths.iter()) {
             let mut cx = x.round();
             for run in g {
@@ -148,28 +151,148 @@ fn status_surface(th: &Theme, w: i32, h: i32, scale: f64, online: bool, fields: 
         }
     }
     out.flush();
-    drop_shadow(out, &th.tw.status_shadow, scale, None)
+    (drop_shadow(out, &th.tw.status_shadow, scale, None), left)
+}
+
+/// The status line's glass at `scale`: its pad round the letters, and how far its picture reaches past
+/// the line's area (both 0 without glass).
+fn glass_reach(th: &Theme, scale: f64) -> (f64, f64) {
+    let gl = &th.tw.status_glass;
+    if gl.pad <= 0.0 {
+        return (0.0, 0.0);
+    }
+    let pad = (gl.pad * status_font(th, &probe(), scale).1).round();
+    (pad, pad + (2.0 * scale).max(1.0).ceil() + 1.0)
+}
+
+/// The status line's picture: over its glass, if it has one, the picture under it (`under`, the screen
+/// behind the scene's moving parts at rest, and where it stands) blurred and tinted, in a rounded box
+/// with an edge. Its picture reaches `reach` past the area on every side.
+fn status_picture(th: &Theme, a: Area, online: bool, fields: &[(&str, Option<&str>)], under: Option<&(ImageSurface, f64, f64)>) -> (ImageSurface, f64) {
+    let (w, h) = (a.w as i32, a.h as i32);
+    let (s, left) = status_surface(th, w, h, a.scale, online, fields);
+    let (pad, reach) = glass_reach(th, a.scale);
+    if reach == 0.0 {
+        return (s, 0.0);
+    }
+    let gl = &th.tw.status_glass;
+    let r = reach as i32;
+    let out = surface(w + 2 * r, h + 2 * r);
+    let cap = status_font(th, &probe(), a.scale).1;
+    let base = (h as f64 / 2.0 + cap / 2.0).round();
+    // the box, in the picture's pixels
+    let (x0, y0, x1, y1) = (reach + left - pad, reach + base - cap - pad, reach + w as f64 + pad, reach + base + pad);
+    let radius = gl.round * (y1 - y0);
+    let shape = |c: &Context| {
+        let k = radius.min((x1 - x0) / 2.0);
+        c.new_sub_path();
+        c.arc(x1 - k, y0 + k, k, -PI / 2.0, 0.0);
+        c.arc(x1 - k, y1 - k, k, 0.0, PI / 2.0);
+        c.arc(x0 + k, y1 - k, k, PI / 2.0, PI);
+        c.arc(x0 + k, y0 + k, k, PI, 1.5 * PI);
+        c.close_path();
+    };
+    {
+        let c = ctx(&out);
+        let _ = c.save();
+        shape(&c);
+        c.clip();
+        if let Some((under, ux, uy)) = under {
+            // blurred: the box and a margin cut out, scaled down and up again
+            let blur = (gl.blur * a.scale).max(1.0);
+            let m = (2.0 * blur).ceil() as i32;
+            let (ox, oy) = ((a.x - reach).round() as i32 - m, (a.y - reach).round() as i32 - m);
+            let cut = surface(out.width() + 2 * m, out.height() + 2 * m);
+            {
+                let q = ctx(&cut);
+                let _ = q.set_source_surface(under, ux - ox as f64, uy - oy as f64);
+                let _ = q.paint();
+            }
+            let small = resampled(&cut, 1.0 / blur, cairo::Filter::Good);
+            let _ = c.save();
+            c.translate(-m as f64, -m as f64);
+            c.scale(cut.width() as f64 / small.width() as f64, cut.height() as f64 / small.height() as f64);
+            let p = cairo::SurfacePattern::create(&small);
+            p.set_filter(cairo::Filter::Bilinear);
+            let _ = c.set_source(&p);
+            let _ = c.paint();
+            let _ = c.restore();
+        }
+        let (tr, tg, tb) = gl.tint_colour.rgb();
+        c.set_source_rgba(tr, tg, tb, gl.tint);
+        let _ = c.paint();
+        let _ = c.restore();
+        if gl.edge > 0.0 {
+            let line = a.scale.max(0.5);
+            let (er, eg, eb) = gl.edge_colour.rgb();
+            // lit from above: the top edge brighter than the foot
+            let light = cairo::LinearGradient::new(0.0, y0, 0.0, y1);
+            light.add_color_stop_rgba(0.0, er, eg, eb, gl.edge);
+            light.add_color_stop_rgba(1.0, er, eg, eb, gl.edge * 0.35);
+            shape(&c);
+            c.set_line_width(line);
+            let _ = c.set_source(&light);
+            let _ = c.stroke();
+        }
+        let _ = c.set_source_surface(&s, reach, reach);
+        let _ = c.paint();
+    }
+    (out, reach)
 }
 
 pub struct Status {
     b: Base,
     shown: Net,
+    /// How far its picture reaches past its area (its glass).
+    reach: f64,
+    /// The picture under it, for its glass: the screen's, until it is placed; then the piece of it
+    /// round its glass, and where that stands.
+    under: Option<ImageSurface>,
+    behind: Option<(ImageSurface, f64, f64)>,
 }
 
 pub const TYPE: WidgetType = WidgetType {
     name: "status",
     check: crate::elements::check::<StatusSettings>,
-    make: |name, _| Box::new(Status { b: Base::new(name), shown: Net::default() }),
+    make: |name, _| Box::new(Status { b: Base::new(name), shown: Net::default(), reach: 0.0, under: None, behind: None }),
 };
 
 super::settings!(StatusSettings {});
 impl crate::elements::Validate for StatusSettings {}
+
+/// The status line in the bottom right corner of the usable area: its outer corner (its glass's, or its
+/// letters') as far from the bottom and the right as the hostname's ink reaches toward its own corner.
+fn cornered(g: &Geo, area: Area) -> Area {
+    let th = &g.th;
+    let (gap_v, gap_h) = match th.tw.title_corner {
+        TitleCorner::BottomLeft => {
+            let (x, y) = th.title_ink_corner(g.w, g.h, &g.host, g.edges);
+            ((g.h - g.edges.bottom) as f64 - y, x - g.edges.left as f64)
+        }
+        TitleCorner::TopRight => (th.title_place(g.w, g.h, &g.host, g.edges).y0, g.w as f64 - th.title_right(g.w, g.h)),
+    };
+    let cap = status_font(th, &probe(), area.scale).1;
+    let pad = glass_reach(th, area.scale).0;
+    let right = (g.w - g.edges.right) as f64 - gap_h - pad;
+    let mut base = (g.h - g.edges.bottom) as f64 - gap_v - pad;
+    // too narrow for both side by side (a portrait monitor): the line stands above the hostname
+    if th.tw.title_corner == TitleCorner::BottomLeft && g.header.contains(Piece::Title) && !g.host.is_empty() {
+        let (_, top, title_right, _) = th.title_box(g.w, g.h, &g.host, g.edges);
+        if right - area.w - pad < title_right {
+            base = base.min(top - pad - (area.h / 2.0 - cap / 2.0).max(0.0));
+        }
+    }
+    Area { x: (right - area.w).round(), y: (base - (area.h / 2.0 + cap / 2.0).round()).round(), ..area }
+}
 
 impl Status {
     /// Under the graph or the horizon, or at its group's anchor: left- or right-aligned to the group,
     /// top- or bottom-aligned.
     fn place(&self, g: &Geo, placed: Option<Area>, zoom: f64, s: &Shared) -> Area {
         let area = status_area(&g.th, g.w, g.h, zoom, s.graph);
+        if self.b.anchor == Anchor::Status && g.th.tw.status_corner {
+            return cornered(g, area);
+        }
         let Some(p) = placed.filter(|_| self.b.anchor != Anchor::Status) else { return area };
         let top = if matches!(self.b.anchor, Anchor::UnderTitle | Anchor::TopLeft | Anchor::TopRight) { p.y } else { p.y + p.h - area.h };
         let mut right = p.x + p.w;
@@ -198,7 +321,30 @@ impl Widget for Status {
         Some((1.max(((w + gap as f64) / (cw + gap) as f64).ceil() as i32), 1))
     }
     fn start(&mut self, g: &Geo, w: &World, s: &Shared) {
-        self.b.area = Some(self.place(g, self.b.area, w.zoom, s));
+        let a = self.place(g, self.b.area, w.zoom, s);
+        self.reach = glass_reach(&g.th, a.scale).1;
+        if let Some(under) = self.under.take() {
+            // only the piece round the glass is kept, with room for its blur
+            let m = (self.reach + 2.0 * (g.th.tw.status_glass.blur * a.scale).max(1.0)).ceil() + 2.0;
+            let (x, y) = ((a.x - m).floor(), (a.y - m).floor());
+            let piece = surface((a.w + 2.0 * m).ceil() as i32 + 1, (a.h + 2.0 * m).ceil() as i32 + 1);
+            {
+                let c = ctx(&piece);
+                let _ = c.set_source_surface(&under, -x, -y);
+                let _ = c.paint();
+            }
+            self.behind = Some((piece, x, y));
+        }
+        self.b.area = Some(a);
+    }
+    fn top(&self) -> Option<f64> {
+        self.b.area.map(|a| a.y - self.reach)
+    }
+    fn under(&self, th: &Theme) -> bool {
+        th.tw.status_glass.pad > 0.0
+    }
+    fn set_under(&mut self, picture: &ImageSurface) {
+        self.under = Some(picture.clone());
     }
     fn state(&mut self, w: &World) -> u64 {
         let net = &w.network;
@@ -221,12 +367,14 @@ impl Widget for Status {
         if self.b.baked != Some(self.b.state) {
             let n = &self.shown;
             let fields = [("IP", n.address.as_deref()), ("GW", n.router.as_deref()), ("WAN", n.public.as_deref())];
-            let s = status_surface(th, a.w as i32, a.h as i32, a.scale, n.online == Some(true), &fields);
+            let (s, reach) = status_picture(th, a, n.online == Some(true), &fields, self.behind.as_ref());
             self.b.put(gfx, &s);
             self.b.baked = Some(self.b.state);
+            self.reach = reach;
         }
         if let Some(t) = self.b.tex {
-            gfx.image(t, a.x, a.y, a.w, a.h, p, Blend::Premultiplied);
+            let k = self.reach;
+            gfx.image(t, a.x - k, a.y - k, a.w + 2.0 * k, a.h + 2.0 * k, p, Blend::Premultiplied);
         }
     }
 }

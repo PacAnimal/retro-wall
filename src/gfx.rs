@@ -1,6 +1,7 @@
 //! The renderer, on OpenGL 3.3 core or 2.1 (GLSL 330 or 120). Parts append quads (four corners of
 //! u, v, r, g, b, a, x, y) to one vertex stream; a frame uploads it once, indexed, and makes one draw per
-//! run of quads sharing a texture, blend and clip.
+//! run of quads sharing a texture, blend, clip and mask. A masked run multiplies each pixel by the alpha
+//! of a second texture, placed on the picture by a mapping of its own (a tank's window).
 
 use cairo::{Format, ImageSurface};
 use gl::types::*;
@@ -11,6 +12,28 @@ pub enum Blend {
     Opaque,
     Alpha,
     Premultiplied,
+    /// Lightens: 1 - (1 - source)(1 - destination), the source premultiplied.
+    Screen,
+    /// Adds the premultiplied source.
+    Add,
+}
+
+/// A mask for a run: the texture whose alpha it multiplies by, and where it stands, as
+/// (x scale, y scale, x offset, y offset) from picture pixels to the texture's u and v.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Mask {
+    pub tex: Tex,
+    pub map: [f32; 4],
+}
+
+impl Mask {
+    /// The texture's piece `uv` (u0, v0, u1, v1) laid over the picture's rectangle (x0, y0)-(x1, y1).
+    pub fn over(tex: Tex, rect: (f64, f64, f64, f64), uv: (f64, f64, f64, f64)) -> Mask {
+        let (x0, y0, x1, y1) = rect;
+        let (u0, v0, u1, v1) = uv;
+        let (sx, sy) = ((u1 - u0) / (x1 - x0), (v1 - v0) / (y1 - y0));
+        Mask { tex, map: [sx as f32, sy as f32, (u0 - x0 * sx) as f32, (v0 - y0 * sy) as f32] }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -86,6 +109,7 @@ struct Custom {
 struct Cmd {
     custom: Option<usize>,
     tex: Option<Tex>,
+    mask: Option<Mask>,
     blend: Blend,
     scissor: Option<(i32, i32, i32, i32)>,
     first: usize, // in quads
@@ -124,6 +148,8 @@ pub struct Gfx {
     uniforms: Vec<Uniform>,
     samplers: Vec<(GLint, Tex)>,
     prog: GLuint,
+    /// The masked program, its `textured` and `retro_mask` uniforms.
+    masked: (GLuint, GLint, GLint),
     vbo: GLuint,
     ibo: GLuint,
     indexed: usize, // quads the index buffer holds
@@ -144,9 +170,34 @@ void main() {
   gl_Position = vec4(retro_view.x * pos.x + retro_view.y, retro_view.z * pos.y + retro_view.w, 0.0, 1.0);
 }";
 
-fn vs(core: bool) -> String {
+// the masked program's: the mask's texture coordinates from the picture's
+const VS_MASKED: &str = "uniform vec4 retro_view; uniform vec4 retro_mask;
+ATTR vec2 uv; ATTR vec4 col; ATTR vec2 pos;
+VARY vec2 retro_t; VARY vec4 retro_c; VARY vec2 retro_m;
+void main() {
+  retro_t = uv; retro_c = col; retro_m = pos * retro_mask.xy + retro_mask.zw;
+  gl_Position = vec4(retro_view.x * pos.x + retro_view.y, retro_view.z * pos.y + retro_view.w, 0.0, 1.0);
+}";
+
+fn vs_of(core: bool, src: &str) -> String {
     let (head, inn, out) = if core { ("#version 330 core\n", "in", "out") } else { ("#version 120\n", "attribute", "varying") };
-    format!("{head}{VS}").replace("ATTR", inn).replace("VARY", out)
+    format!("{head}{src}").replace("ATTR", inn).replace("VARY", out)
+}
+
+fn vs(core: bool) -> String {
+    vs_of(core, VS)
+}
+
+fn fs_masked(core: bool) -> &'static str {
+    if core {
+        "#version 330 core\nuniform sampler2D tex; uniform sampler2D retro_mask_tex; uniform float textured;\n\
+         in vec2 retro_t; in vec4 retro_c; in vec2 retro_m; out vec4 colour;\n\
+         void main() { colour = (textured > 0.5 ? texture(tex, retro_t) * retro_c : retro_c) * texture(retro_mask_tex, retro_m).a; }"
+    } else {
+        "#version 120\nuniform sampler2D tex; uniform sampler2D retro_mask_tex; uniform float textured;\n\
+         varying vec2 retro_t; varying vec4 retro_c; varying vec2 retro_m;\n\
+         void main() { gl_FragColor = (textured > 0.5 ? texture2D(tex, retro_t) * retro_c : retro_c) * texture2D(retro_mask_tex, retro_m).a; }"
+    }
 }
 
 fn fs(core: bool) -> &'static str {
@@ -252,6 +303,12 @@ impl Gfx {
             set_view(prog, rect);
             gl::Uniform1i(gl::GetUniformLocation(prog, c"tex".as_ptr()), 0);
             let textured = gl::GetUniformLocation(prog, c"textured".as_ptr());
+            let mprog = program(&vs_of(core, VS_MASKED), fs_masked(core)).unwrap_or_else(|e| panic!("the renderer's masked shaders: {e}"));
+            set_view(mprog, rect);
+            gl::Uniform1i(gl::GetUniformLocation(mprog, c"tex".as_ptr()), 0);
+            gl::Uniform1i(gl::GetUniformLocation(mprog, c"retro_mask_tex".as_ptr()), 1);
+            let masked = (mprog, gl::GetUniformLocation(mprog, c"textured".as_ptr()), gl::GetUniformLocation(mprog, c"retro_mask".as_ptr()));
+            gl::UseProgram(prog);
             gl::Viewport(0, 0, rect.2, rect.3);
             let (mut vbo, mut ibo) = (0, 0);
             gl::GenBuffers(1, &mut vbo);
@@ -272,6 +329,7 @@ impl Gfx {
                 uniforms: vec![],
                 samplers: vec![],
                 prog,
+                masked,
                 vbo,
                 ibo,
                 indexed: 0,
@@ -406,10 +464,15 @@ impl Gfx {
 
     /// Open (or extend) a run for `quads` quads that the caller appends next.
     fn run(&mut self, tex: Option<Tex>, blend: Blend, quads: usize) {
+        self.run_masked(tex, None, blend, quads)
+    }
+
+    fn run_masked(&mut self, tex: Option<Tex>, mask: Option<Mask>, blend: Blend, quads: usize) {
         let first = self.verts.len() / 32;
         if let Some(last) = self.cmds.last_mut()
             && last.custom.is_none()
             && last.tex == tex
+            && last.mask == mask
             && last.blend == blend
             && last.scissor == self.scissor
             && last.first + last.count == first
@@ -417,7 +480,7 @@ impl Gfx {
             last.count += quads;
             return;
         }
-        self.cmds.push(Cmd { custom: None, tex, blend, scissor: self.scissor, first, count: quads });
+        self.cmds.push(Cmd { custom: None, tex, mask, blend, scissor: self.scissor, first, count: quads });
     }
 
     fn corner(&mut self, u: f64, v: f64, rgba: [f32; 4], x: f64, y: f64) {
@@ -441,6 +504,16 @@ impl Gfx {
             return;
         }
         self.run(tex, blend, n);
+        self.verts.extend_from_slice(&data[..n * 32]);
+    }
+
+    /// Quads as `draw` makes them, each pixel times the alpha of `mask` there.
+    pub fn draw_masked(&mut self, tex: Option<Tex>, mask: Mask, data: &[f32], blend: Blend) {
+        let n = data.len() / 32;
+        if n == 0 {
+            return;
+        }
+        self.run_masked(tex, Some(mask), blend, n);
         self.verts.extend_from_slice(&data[..n * 32]);
     }
 
@@ -579,7 +652,7 @@ impl Gfx {
         self.corner(1.0, 1.0, c, x1, y1);
         self.corner(0.0, 1.0, c, x0, y1);
         self.customs.push(custom);
-        self.cmds.push(Cmd { custom: Some(self.customs.len() - 1), tex: None, blend, scissor: self.scissor, first, count: 1 });
+        self.cmds.push(Cmd { custom: Some(self.customs.len() - 1), tex: None, mask: None, blend, scissor: self.scissor, first, count: 1 });
     }
 
     /// Indices for at least `quads` quads: corners (0, 1, 3) and (1, 2, 3) of each.
@@ -628,6 +701,14 @@ impl Gfx {
                             gl::Enable(gl::BLEND);
                             gl::BlendFunc(gl::ONE, gl::ONE_MINUS_SRC_ALPHA);
                         }
+                        Blend::Screen => {
+                            gl::Enable(gl::BLEND);
+                            gl::BlendFunc(gl::ONE, gl::ONE_MINUS_SRC_COLOR);
+                        }
+                        Blend::Add => {
+                            gl::Enable(gl::BLEND);
+                            gl::BlendFunc(gl::ONE, gl::ONE);
+                        }
                     }
                     blend = Some(c.blend);
                 }
@@ -662,6 +743,22 @@ impl Gfx {
                     gl::DrawElements(gl::TRIANGLES, (c.count * 6) as i32, gl::UNSIGNED_INT, at);
                     gl::UseProgram(self.prog);
                     tex = None; // the texture unit's binding is not ours to trust after a custom draw
+                    continue;
+                }
+                if let Some(m) = c.mask {
+                    let (mprog, textured, map) = self.masked;
+                    gl::UseProgram(mprog);
+                    gl::Uniform4f(map, m.map[0], m.map[1], m.map[2], m.map[3]);
+                    gl::Uniform1f(textured, if c.tex.is_some() { 1.0 } else { 0.0 });
+                    gl::ActiveTexture(gl::TEXTURE1);
+                    gl::BindTexture(gl::TEXTURE_2D, self.textures[m.tex.0 as usize].id);
+                    gl::ActiveTexture(gl::TEXTURE0);
+                    if let Some(t) = c.tex {
+                        gl::BindTexture(gl::TEXTURE_2D, self.textures[t.0 as usize].id);
+                    }
+                    gl::DrawElements(gl::TRIANGLES, (c.count * 6) as i32, gl::UNSIGNED_INT, at);
+                    gl::UseProgram(self.prog);
+                    tex = None; // unit 0 was bound for the masked draw
                     continue;
                 }
                 if tex != Some(c.tex) {

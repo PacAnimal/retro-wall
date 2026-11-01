@@ -31,7 +31,7 @@ pub fn power() -> crate::platform::Power {
         }
     }
     let charge = if charges.is_empty() { 0.0 } else { charges.iter().sum::<f64>() / charges.len() as f64 };
-    crate::platform::Power { charge, on_battery: !charges.is_empty() && !mains }
+    crate::platform::Power { charge, on_battery: !charges.is_empty() && !mains, battery: !charges.is_empty() }
 }
 
 /// Whether a connection to local TCP `port` is established, in /proc/net/tcp or tcp6.

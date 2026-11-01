@@ -70,6 +70,27 @@ impl<'de> Deserialize<'de> for Shadow {
     }
 }
 
+/// Glass behind the status line: a rounded box `pad` capital heights round its letters, its corners
+/// rounded by `round` of its height (0.5: a pill), over the picture behind it blurred by `blur` pixels
+/// (at scale 1), tinted `tint` of `tint_colour`, edged `edge` of `edge_colour`. A pad of 0 draws none.
+#[derive(Clone, Copy, Debug)]
+pub struct Glass {
+    pub pad: f64,
+    pub round: f64,
+    pub blur: f64,
+    pub tint: f64,
+    pub edge: f64,
+    pub tint_colour: Colour,
+    pub edge_colour: Colour,
+}
+
+impl<'de> Deserialize<'de> for Glass {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let (pad, round, blur, tint, edge, tint_colour, edge_colour) = <(f64, f64, f64, f64, f64, Colour, Colour)>::deserialize(d)?;
+        Ok(Glass { pad, round, blur, tint, edge, tint_colour, edge_colour })
+    }
+}
+
 /// The tape reel: SVG path data on a 32 x 32 box centred on (16, 16), filled even-odd; and its two
 /// windows, the smallest of its subpaths (by box) off the hub on the left and on the right, which the
 /// spool's fill leaves open.
@@ -198,6 +219,8 @@ pub struct Tweaks {
     pub bolt: f64,
     pub status_zoom: f64,
     pub status_shadow: Shadow,
+    pub status_glass: Glass,
+    pub status_corner: bool,
     pub status_colours: [MaybeColour; 2],
     pub status_space: f64,
 
@@ -338,6 +361,7 @@ pub const LIMITS: &[(&str, Limit)] = &[
     ("bolt", all(0.0, 100.0)),
     ("status_zoom", all(0.25, 4.0)),
     ("status_shadow", at(SHADOW)),
+    ("status_glass", at(&[(0.0, 4.0), (0.0, 0.5), (0.0, 64.0), ALPHA, ALPHA])),
     ("status_space", all(0.0, 10.0)),
     ("mountains", at(&[(0.01, 0.5), (5.0, 3600.0)])),
     ("mountain_fade", at(&[(0.0, 10.0), ALPHA])),

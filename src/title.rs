@@ -19,7 +19,21 @@ type InkEdges = Vec<Option<(f64, f64)>>;
 pub struct Measures {
     edges: Mutex<HashMap<char, InkEdges>>,
     kerns: Mutex<HashMap<(char, char), f64>>,
-    ink: Mutex<HashMap<String, (f64, f64)>>,
+    ink: Mutex<HashMap<String, Ink>>,
+}
+
+/// How far a name's ink (strokes and extrusion, slanted) reaches past its slanted letter box, in letter
+/// units.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Ink {
+    /// Above the cap.
+    pub above: f64,
+    /// Right of the top right corner.
+    pub past: f64,
+    /// Below the baseline.
+    pub below: f64,
+    /// From the first letter's foot to the leftmost ink (negative: left of it).
+    pub left: f64,
 }
 
 /// A measurements map; one left poisoned by a panic elsewhere is used as it is.
@@ -288,9 +302,8 @@ impl Theme {
         u.min(room / (self.title_layout(text).1 + tw.slant * 6.0).max(1.0))
     }
 
-    /// How far the ink (strokes and extrusion, slanted) reaches past the slanted letter box, in letter
-    /// units: (above the cap, right of the top right corner). Measured from a render, kept per name.
-    pub fn title_ink(&self, text: &[char]) -> (f64, f64) {
+    /// How far the ink reaches past the slanted letter box. Measured from a render, kept per name.
+    pub fn title_ink(&self, text: &[char]) -> Ink {
         let key: String = text.iter().collect();
         if let Some(&v) = held(&self.measures.ink).get(&key) {
             return v;
@@ -299,7 +312,7 @@ impl Theme {
         let (xs, span) = self.title_layout(text);
         let (k, pad) = (16.0, 3.0);
         let size = (((span + 6.0 * slant + 2.0 * pad) * k).round() as i32, ((6.0 + 2.0 * pad) * k).round() as i32);
-        let mut v = (0.0, 0.0);
+        let mut v = Ink::default();
         if let Ok(mut image) = ImageSurface::create(Format::A8, size.0, size.1) {
             if let Ok(c) = Context::new(&image) {
                 c.scale(k, k);
@@ -317,8 +330,13 @@ impl Theme {
             let data = pixels(&mut image);
             let rows: Vec<usize> = (0..h).filter(|&y| data[y * stride..y * stride + w].iter().any(|&v| v > 127)).collect();
             let cols: Vec<usize> = (0..w).filter(|&x| !rows.is_empty() && rows.iter().any(|&y| data[y * stride + x] > 127)).collect();
-            if let (Some(&last), Some(&top)) = (cols.last(), rows.first()) {
-                v = (pad - top as f64 / k, (last + 1) as f64 / k - pad - span - 6.0 * slant);
+            if let (Some(&first), Some(&last), Some(&top), Some(&bottom)) = (cols.first(), cols.last(), rows.first(), rows.last()) {
+                v = Ink {
+                    above: pad - top as f64 / k,
+                    past: (last + 1) as f64 / k - pad - span - 6.0 * slant,
+                    below: (bottom + 1) as f64 / k - pad - 6.0,
+                    left: first as f64 / k - pad - xs.first().copied().unwrap_or(0.0),
+                };
             }
         }
         held(&self.measures.ink).insert(key, v);
@@ -341,7 +359,7 @@ impl Theme {
             return Placed { text, u, cap, xs, y0: base - cap, base, x0 };
         }
         if tw.corner != 0.0 {
-            let (above, past) = self.title_ink(&text);
+            let Ink { above, past, .. } = self.title_ink(&text);
             let y0 = tw.corner * unit(width, height) + above * u;
             let x0 = self.title_right(width, height) - (span + past) * u - tw.slant * cap;
             return Placed { text, u, cap, xs, y0, base: y0 + cap, x0 };
@@ -349,6 +367,13 @@ impl Theme {
         let y0 = tw.title_top * unit(width, height);
         let x0 = self.title_right(width, height) - span * u - tw.slant * cap;
         Placed { text, u, cap, xs, y0, base: y0 + cap, x0 }
+    }
+
+    /// The lowest, leftmost point of the hostname's ink, in pixels.
+    pub fn title_ink_corner(&self, width: i32, height: i32, host: &str, edges: Edges) -> (f64, f64) {
+        let p = self.title_place(width, height, host, edges);
+        let ink = self.title_ink(&p.text);
+        (p.x0 + (p.xs.first().copied().unwrap_or(0.0) + ink.left) * p.u, p.base + ink.below * p.u)
     }
 
     /// Caption rows under the hostname: (ruler y, text baseline, font size).
