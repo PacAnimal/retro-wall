@@ -61,7 +61,8 @@ label = "LOAD"
 ```
 
 The built-in sources: `cpu`, `ram`, `swap`, `bat`, `disk`, `used` and `free` (of `/`, or of a path:
-`used:/home`).
+`used:/home`), and the network's traffic, `down` and `up` (on a log scale: 0 at a kilobit a second, 100
+at a gigabit).
 
 ## An instrument
 
@@ -124,7 +125,12 @@ That is a whole theme. From there:
   bright; `caption`, the instruments' lettering; ...), or `hue` and `chroma` to turn them all.
 - **The tweaks** (`[tweaks]`): the core's shapes and sizes: where the hostname stands (`title_corner`),
   the vignette, the scanlines, the instruments' frames (`card_frame`). `retro-wall --settings NAME`
-  lists every one, as the theme has it.
+  lists every one, as the theme has it. Over a busy picture the network's status line can stand on
+  frosted glass, `status_glass = [pad, round, blur, tint, edge, "#tint", "#edge"]` (a rounded box `pad`
+  capital heights round the letters, its corners `round` of its height, 0.5 a pill, over the picture
+  behind it blurred by `blur` pixels, tinted and edged; a pad of 0 draws none), and in the bottom right
+  corner with `status_corner = true`, its outer edge as far in from the bottom and the right as the
+  hostname stands from its own edges, within the desktop's panels.
 - **The scene** (`scene = [...]`, bottom to top) and **its elements** (`[element.NAME]`, with `type =
   "KIND"` and its settings). `retro-wall --settings NAME` lists every setting of every element.
 - **The instruments**: `[[group]]` and `[widget.NAME]`, as in `retro.toml` (which wins over a theme's).
@@ -149,6 +155,24 @@ image = "harbour.png"
 Patches of the picture can light and dim (`type = "lights"`), a lamp can flicker (`"lamp"`), a screen can
 show pictures (`"screen"`), rain can fall (`"rain"`), drops can run down a window (`"glass-drops"` and
 `"glass-frame"`): the neon_rain theme is all of them, and only TOML.
+
+A painting can also **run on the readings**: parts laid over it that turn, fill, point, glow and steam,
+each following a source. The copperworks theme is all of them, and only TOML. They are placed in the
+pixels of `canvas_source` (scaled by `canvas_scale` onto the painting, as the patches are), and each
+picture is scaled once for the screen. Every part's `source` is a source's name, or `""` for its own
+idle motion; `"bat|swap"` takes the first the machine has (here the battery, or swap where there is
+none). A source that fails eases back to the idle motion, and returns when it reads again.
+
+| Kind | Draws | Its main settings |
+|---|---|---|
+| `rotors` | sprites turning about their pivots | `rotors = [{ image, at, size, speed, phase, pivot }]` (degrees a second, clockwise); `source`: at 100 they turn `load` times as fast, eased over `ease` seconds. The angle adds up the speed: a change never jumps |
+| `tank` | a liquid filling a window from its foot, exactly empty at 0 and full at 1 | `mask` (its alpha is the window), `liquid`, `glass` and `frame` over it, `at`, `size`; `source`, or `mean` + `amplitude` sin(2 pi t / `period` + `phase`); `overscan` and `drift` (the liquid's picture moves, never past its edge), `ripple` (canvas pixels, none at empty or full), `meniscus`, `bubbles` (rising, cut where the liquid ends), `cavity` (the empty window) |
+| `gauges` | a still dial and a needle about its hub | `dial`, `needle`, `needle_size`; `sweep = [from, to]` (degrees clockwise from up, at 0 and 1); `gauges = [{ at, size, phase, source }]`; with no reading `mean` + `swing` sin(`rate` t + phase); a `wobble` on top |
+| `pilot-lamps` | a dark lamp, its lit lens at its brightness, a soft halo | `off`, `lens`, `halo` (colour), `halo_size`, `halo_strength`, `halo_blend` (`"screen"` or `"add"`); each of `lamps = [{ at, size, period, phase }]` breathes from `low` to full; `source` flickers them by up to `flicker`; `on = false` puts them out |
+| `steam` | vents, and puffs rising from them | `vent` (or `""`), `puffs` (pictures, taken in turn), `particles`, `period`; a puff's opacity is sin(pi age)^2 x `opacity` x strength, clear at both ends of its life; `vents = [{ at, size, plume, intensity, phase, source }]`: the strength is `intensity`, from `rest` of it at 0 to all of it at 100 |
+
+`at` is a picture's centre (a rotor's pivot), and `size` its width and height. A part in front of the
+moving ones, still, is a `painting` with `image = ""` and its picture in `steady`.
 
 **Motion of your own** is a fragment shader, drawn on the GPU every frame, costing nothing on the CPU:
 
@@ -178,6 +202,17 @@ regular file, and only up to a size for its kind (a shader 1 MB, a theme.toml 4 
 Put its name in `scene` where it belongs: over what it covers, under what covers it. A shader that does
 not compile is said, with the compiler's message, and left out.
 Names that start with `retro_` are retro-wall's own: give your variables any other name.
+
+## Sharing your theme
+
+A theme made for everyone is welcome as a pull request. It holds:
+
+- the theme's directory, `themes/NAME/`, with its `theme.toml` and only the pictures it uses;
+- art that is your own, or that you have the right to share under this project's license (PNGs
+  without text chunks or other metadata);
+- a screenshot, `retro-wall --snapshot NAME.png --demo 13:37 --theme NAME`, for the README;
+- the tests passing (`cargo test --release`), with the theme added to the bundled-theme tests and its
+  reference picture made (`RETRO_BLESS=1`, the other pictures left as they are).
 
 ## Testing what you made
 

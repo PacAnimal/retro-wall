@@ -96,7 +96,9 @@ struct PaintingSettings {
 
 impl Validate for PaintingSettings {
     fn validate(&self) -> Result<(), String> {
-        named("image", &self.image)?;
+        if self.image.is_empty() && self.steady.is_empty() {
+            return Err("image: it names the painting, or steady its patches alone".into());
+        }
         self.steady.iter().enumerate().try_for_each(|(i, p)| {
             named(&format!("steady[{i}].image"), &p.image)?;
             each(&format!("steady[{i}].at"), &p.at, -16384.0, 16384.0)
@@ -104,7 +106,8 @@ impl Validate for PaintingSettings {
     }
 }
 
-/// The painting, covering the screen, with its steady patches laid on it for good.
+/// The painting, covering the screen, with its steady patches laid on it for good. With no image, the
+/// patches alone, over what is under them (a pipe in front of the machine's moving parts).
 pub struct Painting {
     image: String,
     steady: Vec<(String, f64, f64)>,
@@ -133,8 +136,10 @@ impl Part for Painting {
             let p = ctx(&out);
             p.translate(ox, oy);
             p.scale(s, s);
-            let _ = p.set_source(picture(th, &self.image));
-            let _ = p.paint();
+            if !self.image.is_empty() {
+                let _ = p.set_source(picture(th, &self.image));
+                let _ = p.paint();
+            }
             p.scale(sc.0, sc.1);
             for (img, x, y) in &self.steady {
                 let patch = picture(th, img);

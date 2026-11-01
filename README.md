@@ -1,8 +1,9 @@
 # retro-wall
 
 A live desktop wallpaper: a scene that moves (a synthwave horizon, a rainy neon city, an arctic night,
-the digital rain, a winter field, a pirate island), with the machine's readings in it: meters, a tape
-deck that plays with the disks, the network's traffic as mountains, its status line.
+the digital rain, a winter field, a pirate island, an engine of copper and steam), with the machine's
+readings in it: meters, a tape deck that plays with the disks, the network's traffic as mountains, its
+status line.
 
 One Rust binary. It draws on the GPU (OpenGL 3.3, or 2.1 on older hardware), presents a frame only when
 something in it changed, and stops while the picture is covered or the machine is on battery.
@@ -26,7 +27,10 @@ Pick one with `--theme NAME`. Click a picture for the full size.
 | [![phosphor](screenshots/landscape.png)](screenshots/landscape.png) **phosphor** (default): a synthwave horizon in CRT amber | [![guybrush](screenshots/themes/guybrush.png)](screenshots/themes/guybrush.png) **guybrush**: a painted pirate island |
 | [![night_city](screenshots/themes/night_city.png)](screenshots/themes/night_city.png) **night_city**: a cyberpunk city in the rain | [![neon_rain](screenshots/themes/neon_rain.png)](screenshots/themes/neon_rain.png) **neon_rain**: a room over a rainy neon city |
 | [![matrix](screenshots/themes/matrix.png)](screenshots/themes/matrix.png) **matrix**: the digital rain | [![winter](screenshots/themes/winter-day.png)](screenshots/themes/winter-day.png) **winter**: a snowfield that follows the clock |
-| [![aurora](screenshots/themes/aurora.png)](screenshots/themes/aurora.png) **aurora**: northern lights over open water | **[Your theme here](EXTENDING.md)** |
+| [![aurora](screenshots/themes/aurora.png)](screenshots/themes/aurora.png) **aurora**: northern lights over open water | [![copperworks](screenshots/themes/copperworks.png)](screenshots/themes/copperworks.png) **copperworks**: an alchemical engine that runs on the machine's readings |
+
+Made a theme of your own? Share it: `retro-wall --new theme NAME` starts one, `EXTENDING.md` shows what
+it can do, and a pull request with the theme and a screenshot puts it here for everyone.
 
 Every theme moves:
 
@@ -52,6 +56,10 @@ Every theme moves:
   [![winter's snow, live](screenshots/themes/winter-snow.gif)](screenshots/themes/winter-night.png)
 
 - **aurora**: the curtains of light drift and fold, and the water mirrors them.
+- **copperworks**: the machine is the instruments. The gears turn faster with the processor's load,
+  the gauges read the processor, the disks and the battery, the tanks fill with the memory and the
+  disk's space used, the vents steam with the network's traffic, and the lamps flicker as the disks
+  work. Each part names its reading in the theme, so any of them can show another, or one of yours.
 
 It stays below every window and desktop icon, and clicks go to the desktop:
 
@@ -141,7 +149,8 @@ Options for the autostarted instance go in `~/.config/retro/retro-wall.conf`, on
 `:0.0  --theme winter --battery --pause-screen-off`. The theme, the instruments' layout and plugin
 sources go in `~/.config/retro/retro.toml`.
 
-Themes: `phosphor` (the default), `neon_rain`, `night_city`, `aurora`, `winter`, `matrix`, `guybrush`.
+Themes: `phosphor` (the default), `neon_rain`, `night_city`, `aurora`, `winter`, `matrix`, `guybrush`,
+`copperworks`.
 
 ## Extending
 

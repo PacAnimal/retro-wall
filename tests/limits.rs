@@ -44,7 +44,7 @@ fn tweak(key: &str, v: &Value) -> String {
 }
 
 /// The bases that take most of the time: a painting, or many textures, or full HD.
-const SLOW: &[&str] = &["neon_rain", "winter", "phosphor@full"];
+const SLOW: &[&str] = &["neon_rain", "winter", "phosphor@full", "copperworks"];
 
 /// Whether a case of a slow base is run: each one in `one_in`, picked by its name so that the slow
 /// bases share out the cases between them; every one with RETRO_TEST_FULL set (as the nightly CI run
@@ -145,7 +145,7 @@ fn tweaks_at_their_limits_draw() {
                     Some(r) => Value::Array(vec![with_number(r, i, edge)]),
                     None => with_number(d, i, edge),
                 };
-                for base in ["phosphor", "neon_rain", "winter", "guybrush", "matrix", "phosphor@full", "night_city@portrait"] {
+                for base in ["phosphor", "neon_rain", "winter", "guybrush", "matrix", "copperworks", "phosphor@full", "night_city@portrait"] {
                     if sampled(base, &format!("{key}={v}"), 8) {
                         cases.push((base, key.to_string(), v.clone()));
                     }
@@ -242,7 +242,7 @@ fn broken_letterings_fail_the_trial() {
 fn hostile_element_settings_are_refused_or_draw() {
     let mut cases: Vec<(String, String, String, Value)> = vec![];
     let mut seen = std::collections::HashSet::new();
-    for base in ["phosphor", "neon_rain", "night_city", "winter", "guybrush", "matrix", "aurora"] {
+    for base in ["phosphor", "neon_rain", "night_city", "winter", "guybrush", "matrix", "aurora", "copperworks"] {
         let l = resolve(&bundled(base)).unwrap();
         for e in &l.plain.scene {
             if !seen.insert(e.kind.clone()) {

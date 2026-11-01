@@ -27,7 +27,11 @@ pub fn power() -> crate::platform::Power {
     if unsafe { GetSystemPowerStatus(&mut s) } == 0 || s.BatteryFlag & 128 != 0 || s.BatteryFlag == 255 {
         return Default::default();
     }
-    crate::platform::Power { charge: if s.BatteryLifePercent <= 100 { s.BatteryLifePercent as f64 } else { 0.0 }, on_battery: s.ACLineStatus == 0 }
+    crate::platform::Power {
+        charge: if s.BatteryLifePercent <= 100 { s.BatteryLifePercent as f64 } else { 0.0 },
+        on_battery: s.ACLineStatus == 0,
+        battery: true,
+    }
 }
 
 /// A table GetExtendedTcpTable fills: asked for its size first, then again while it grows.

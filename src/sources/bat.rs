@@ -9,6 +9,11 @@ fn make(_: Option<&str>, demo: bool) -> Option<Box<dyn Source>> {
     Some(Box::new(Bat { demo }))
 }
 
+/// Whether the machine has a battery.
+pub fn present() -> bool {
+    Native::power().battery
+}
+
 struct Bat {
     demo: bool,
 }

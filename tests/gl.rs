@@ -19,7 +19,7 @@ use common::procs::scratch;
 use common::x::{Xvfb, difference};
 use std::path::{Path, PathBuf};
 
-const THEMES: &[&str] = &["phosphor", "neon_rain", "night_city", "aurora", "winter", "matrix", "guybrush"];
+const THEMES: &[&str] = &["phosphor", "neon_rain", "night_city", "aurora", "winter", "matrix", "guybrush", "copperworks"];
 const SIZE: (i32, i32) = (640, 360);
 /// A block of pixels differs when its average in a channel is more than this apart.
 const LEVEL: f64 = 8.0;

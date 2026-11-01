@@ -5,6 +5,7 @@
 mod bat;
 mod cpu;
 mod disk;
+mod net;
 mod network;
 mod ram;
 mod space;
@@ -53,7 +54,7 @@ pub struct Builtin {
     pub make: fn(Option<&str>, bool) -> Option<Box<dyn Source>>,
 }
 
-pub const BUILTINS: &[Builtin] = &[cpu::SOURCE, ram::SOURCE, swap::SOURCE, bat::SOURCE, disk::SOURCE, space::USED, space::FREE];
+pub const BUILTINS: &[Builtin] = &[cpu::SOURCE, ram::SOURCE, swap::SOURCE, bat::SOURCE, disk::SOURCE, space::USED, space::FREE, net::DOWN, net::UP];
 
 /// The built-in a source name means (any case), and its path.
 pub fn builtin(name: &str) -> Option<(&'static Builtin, Option<&str>)> {
@@ -63,6 +64,27 @@ pub fn builtin(name: &str) -> Option<(&'static Builtin, Option<&str>)> {
     };
     let b = BUILTINS.iter().find(|b| b.name.eq_ignore_ascii_case(base))?;
     (path.is_none() || b.path).then_some((b, path))
+}
+
+/// Whether a source can be read here: the battery's charge only where there is one (always with
+/// made-up readings); every other source is taken to be.
+pub fn present(name: &str, demo: bool) -> bool {
+    match builtin(name) {
+        Some((b, _)) if b.name == bat::SOURCE.name => demo || bat::present(),
+        _ => true,
+    }
+}
+
+/// The first of `|`-separated alternatives that `present` finds ("bat|swap"); the last if none is.
+pub fn first_present(spec: &str, demo: bool) -> &str {
+    let mut last = spec;
+    for alt in spec.split('|').map(str::trim) {
+        if present(alt, demo) {
+            return alt;
+        }
+        last = alt;
+    }
+    last
 }
 
 /// The built-in names, as --list shows them.
