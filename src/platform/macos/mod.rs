@@ -21,8 +21,8 @@ impl crate::platform::Platform for Mac {
         system::power()
     }
 
-    fn vnc_connected(port: u16) -> bool {
-        system::vnc_connected(port)
+    fn port_connected(port: u16) -> bool {
+        system::port_connected(port)
     }
 
     fn cpu_times() -> Option<(u64, u64)> {

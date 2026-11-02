@@ -10,7 +10,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 pub const USAGE: &str = "usage: retro-wall [--theme NAME] [--config FILE] [--host NAME] [--battery]
-                  [--pause-screen-off] [--pause-below PERCENT] [--pause-vnc PORT]
+                  [--pause-screen-off] [--pause-below PERCENT] [--pause-vnc PORT] [--pause-rdp PORT]
                   [--interface NAME]... [--ip-url URL] [--reserve-EDGE [MONITOR=]PX]...
                   [--software] [--demo [HH:mm]] [--all-monitors | MONITOR]
            the live desktop
@@ -37,6 +37,8 @@ pub const USAGE: &str = "usage: retro-wall [--theme NAME] [--config FILE] [--hos
   --pause-screen-off  pause while the screen is off, or a laptop's lid is closed on its panel
   --pause-below PCT   on battery, pause only at PCT or less (by default, at any charge)
   --pause-vnc PORT    pause while a VNC viewer is connected to the server on PORT
+  --pause-rdp PORT    pause while a remote desktop client is connected to this machine's RDP
+                      server on PORT (3389 by default in Windows)
   --interface NAME    count this interface's traffic, not the physical ones'; repeat for more
   --ip-url URL        where to ask for the public address (plain-text IPv4)
   --reserve-EDGE [MONITOR=]PX
@@ -106,6 +108,7 @@ pub struct Args {
     pub pause_screen_off: bool,
     pub pause_below: f64,
     pub pause_vnc: Option<u16>,
+    pub pause_rdp: Option<u16>,
     pub interfaces: Vec<String>,
     pub ip_url: String,
     pub software: bool,
@@ -127,6 +130,7 @@ impl Default for Args {
             pause_screen_off: false,
             pause_below: 100.0,
             pause_vnc: None,
+            pause_rdp: None,
             interfaces: vec![],
             ip_url: "https://ip.c-net.org/".into(),
             software: false,
@@ -185,9 +189,10 @@ pub fn parse(args: &[String]) -> Result<(Command, Args), String> {
             "--all-monitors" => a.all_monitors = true,
             "--pause-screen-off" => a.pause_screen_off = true,
             "--pause-below" => a.pause_below = number(&value("PERCENT")?, arg, 0.0, 100.0)?,
-            "--pause-vnc" => {
+            "--pause-vnc" | "--pause-rdp" => {
                 let v = value("PORT")?;
-                a.pause_vnc = Some(v.parse::<u16>().ok().filter(|p| *p > 0).ok_or(format!("--pause-vnc {v}: a TCP port"))?);
+                let port = Some(v.parse::<u16>().ok().filter(|p| *p > 0).ok_or(format!("{arg} {v}: a TCP port"))?);
+                if arg == "--pause-vnc" { a.pause_vnc = port } else { a.pause_rdp = port }
             }
             "--interface" => a.interfaces.push(value("NAME")?),
             "--ip-url" => a.ip_url = value("URL")?,
@@ -592,6 +597,9 @@ mod tests {
         assert!(parsed("--theme").is_err());
         assert_eq!(parsed("--pause-vnc 5900").unwrap().1.pause_vnc, Some(5900));
         assert!(parsed("--pause-vnc 0").is_err());
+        assert_eq!(parsed("--pause-rdp 3389").unwrap().1.pause_rdp, Some(3389));
+        assert_eq!(parsed("--pause-rdp 3389").unwrap().1.pause_vnc, None);
+        assert!(parsed("--pause-rdp x").is_err());
     }
 
     #[test]

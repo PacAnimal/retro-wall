@@ -35,6 +35,8 @@ pub struct Options {
     pub pause_screen_off: bool,
     pub pause_below: f64,
     pub pause_vnc: Option<u16>,
+    /// The RDP server's port: paused while a client is connected to it.
+    pub pause_rdp: Option<u16>,
     pub ip_url: String,
     pub software: bool,
     pub demo: bool,
@@ -65,6 +67,8 @@ struct Monitor {
     shown: bool,
     faded_at: Option<f64>,
     hidden: bool,
+    /// Its window covers the whole monitor: the desktop shows no wallpaper (Display::wallpaper_hidden).
+    whole: bool,
 }
 
 const FADE: f64 = 1.0;
@@ -112,7 +116,9 @@ impl Monitor {
         drop(shared);
         crate::elements::built();
         let uploads = textures.len();
-        let head = live.iter().map(|&i| parts[i].top(&geo)).min().unwrap_or(geo.h - 1).min(geo.h - 1).max(0);
+        // the window over the parts that move; over all of it where the still picture is not shown
+        let whole = d.wallpaper_hidden();
+        let head = if whole { 0 } else { live.iter().map(|&i| parts[i].top(&geo)).min().unwrap_or(geo.h - 1).min(geo.h - 1).max(0) };
         let rect = (0, head, geo.w, geo.h - head);
         let window = match d.window(s.x, s.y + head, rect.2, rect.3) {
             Ok(win) => win,
@@ -158,6 +164,7 @@ impl Monitor {
             shown: true,
             faded_at: None,
             hidden: false,
+            whole,
         })
     }
 
@@ -401,8 +408,11 @@ fn pause_reason(d: &impl Display, o: &Options) -> Option<&'static str> {
     if o.pause_screen_off && d.screen_off() {
         return Some("screen off");
     }
-    if o.pause_vnc.is_some_and(Native::vnc_connected) {
+    if o.pause_vnc.is_some_and(Native::port_connected) {
         return Some("a VNC viewer is connected");
+    }
+    if o.pause_rdp.is_some_and(Native::port_connected) {
+        return Some("a remote desktop client is connected");
     }
     None
 }
@@ -460,10 +470,12 @@ pub fn run(loaded: &Loaded, o: Options) {
             }
             if paused.is_none() || monitors.is_empty() {
                 let want = wanted(&d, &th, &o);
-                // gone, moved, resized, a panel moved, or the header now elsewhere: closed, and made again below
+                let whole = d.wallpaper_hidden();
+                // gone, moved, resized, a panel moved, the header now elsewhere, or the wallpaper shown or
+                // hidden (a remote desktop reconnected): closed, and made again below
                 let mut kept = vec![];
                 for m in monitors.drain(..) {
-                    if want.iter().any(|(s, h, e)| *s == m.screen && *h == m.geo.header && *e == m.geo.edges) {
+                    if m.whole == whole && want.iter().any(|(s, h, e)| *s == m.screen && *h == m.geo.header && *e == m.geo.edges) {
                         kept.push(m);
                     } else {
                         crate::outln!("{}: changed or gone: closed", m.screen.name);

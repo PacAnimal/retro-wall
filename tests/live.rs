@@ -121,6 +121,28 @@ fn it_pauses_for_a_vnc_viewer_and_resumes() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
+#[test]
+fn it_pauses_for_a_remote_desktop_client_and_resumes() {
+    let Some(x) = Xvfb::start("it_pauses_for_a_remote_desktop_client_and_resumes", 640, 360) else { return };
+    let home = scratch("pause-rdp");
+    let server = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = server.local_addr().unwrap().port();
+    // a VNC server on another port, nobody connected: only the RDP client pauses it
+    let idle = TcpListener::bind("127.0.0.1:0").unwrap();
+    let idle_port = idle.local_addr().unwrap().port().to_string();
+    let mut wall = Wall::start(&x, &home, &["--pause-rdp", &port.to_string(), "--pause-vnc", &idle_port]);
+    assert!(wall.wait_for("textures, made in", 20.0), "the wall did not start:\n{}", wall.all_said());
+
+    let client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    let (accepted, _) = server.accept().unwrap();
+    assert!(wall.next("paused: a remote desktop client is connected", 6.0), "not paused for the client:\n{}", wall.all_said());
+    drop(client);
+    drop(accepted);
+    assert!(wall.next("running", 8.0), "not running again after the client left:\n{}", wall.all_said());
+    assert!(wall.alive(), "it stopped:\n{}", wall.all_said());
+    let _ = std::fs::remove_dir_all(&home);
+}
+
 /// Sources that hang, print garbage, die or stream, and faces that answer huge numbers, endless output
 /// or no JSON at all: each said, and the wall keeps drawing.
 #[test]

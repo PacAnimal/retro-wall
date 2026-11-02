@@ -6,7 +6,8 @@
 //! WorkerW it makes when Progman is sent 0x052C, the one following the window that holds the icons
 //! (SHELLDLL_DefView). From Windows 11 24H2 that WorkerW is a child of Progman, below the icons; there
 //! the windows are children of Progman, placed just below the icons, and layered, which that desktop
-//! needs to compose them. Without either, Progman itself.
+//! needs to compose them. Without either, Progman itself. A layered child window needs the exe's
+//! manifest to name Windows 8 or newer (build.rs links it in): without one, it is refused.
 //!
 //! One window per monitor, each over its monitor's part of the host window (which spans the virtual
 //! screen): every monitor paces, pauses and stops when covered on its own, a swap presents one
@@ -35,8 +36,9 @@ use windows_sys::Win32::Graphics::OpenGL::{
 };
 use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress, LoadLibraryW};
 use windows_sys::Win32::System::Power::{POWERBROADCAST_SETTING, RegisterPowerSettingNotification};
-use windows_sys::Win32::System::RemoteDesktop::{NOTIFY_FOR_THIS_SESSION, WTSRegisterSessionNotification};
+use windows_sys::Win32::System::RemoteDesktop::{NOTIFY_FOR_THIS_SESSION, ProcessIdToSessionId, WTSRegisterSessionNotification};
 use windows_sys::Win32::System::SystemServices::GUID_CONSOLE_DISPLAY_STATE;
+use windows_sys::Win32::System::Threading::GetCurrentProcessId;
 use windows_sys::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
@@ -701,6 +703,17 @@ impl crate::platform::Display for Win {
     /// The console display powered down, or the session locked.
     fn screen_off(&self) -> bool {
         !DISPLAY_ON.get() || LOCKED.get()
+    }
+
+    /// A remote session whose client turned the wallpaper off: Windows then keeps the session's own
+    /// `HKCU\Remote\<session>\Control Panel\Desktop`, its Wallpaper empty.
+    fn wallpaper_hidden(&self) -> bool {
+        let mut session = 0u32;
+        // SAFETY: this process's id and a u32 to write the session to.
+        if unsafe { ProcessIdToSessionId(GetCurrentProcessId(), &mut session) } == 0 {
+            return false;
+        }
+        super::desktop::get(&format!(r"Remote\{session}\Control Panel\Desktop"), "Wallpaper").is_some_and(|w| w.is_empty())
     }
 }
 
