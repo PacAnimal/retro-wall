@@ -468,7 +468,9 @@ pub fn run(loaded: &Loaded, o: Options) {
                     m.next_frame = t;
                 }
             }
-            if paused.is_none() || monitors.is_empty() {
+            // paused or not: a remote desktop client that connects both pauses the wall and hides the
+            // wallpaper, and a wall kept for the old desktop would leave its new one half covered and stale
+            {
                 let want = wanted(&d, &th, &o);
                 let whole = d.wallpaper_hidden();
                 // gone, moved, resized, a panel moved, the header now elsewhere, or the wallpaper shown or
