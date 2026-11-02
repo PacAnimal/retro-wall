@@ -88,6 +88,7 @@ fn main() {
         pause_screen_off: a.pause_screen_off,
         pause_below: a.pause_below,
         pause_vnc: a.pause_vnc,
+        pause_rdp: a.pause_rdp,
         ip_url: a.ip_url,
         software: a.software,
         demo: a.demo,

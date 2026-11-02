@@ -35,7 +35,7 @@ pub fn power() -> crate::platform::Power {
 }
 
 /// Whether a connection to local TCP `port` is established, in /proc/net/tcp or tcp6.
-pub fn vnc_connected(port: u16) -> bool {
+pub fn port_connected(port: u16) -> bool {
     ["/proc/net/tcp", "/proc/net/tcp6"].iter().any(|t| std::fs::read_to_string(t).is_ok_and(|s| established_to(&s, port)))
 }
 

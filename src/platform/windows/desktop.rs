@@ -17,7 +17,7 @@ const COLOURS: &str = r"Control Panel\Colors";
 pub struct Wallpaper;
 
 /// A string value under HKCU; None when it is not there.
-fn get(key: &str, value: &str) -> Option<String> {
+pub(super) fn get(key: &str, value: &str) -> Option<String> {
     let (k, v) = (wide(key), wide(value));
     let mut buf = vec![0u16; 1024];
     let mut bytes = (buf.len() * 2) as u32;

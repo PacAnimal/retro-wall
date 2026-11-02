@@ -118,6 +118,11 @@ pub trait Display {
     fn covering(&self) -> Option<Vec<Rect>>;
     /// Whether nobody can see the screens: powered down, or a laptop's lid closed on its own panel.
     fn screen_off(&self) -> bool;
+    /// Whether the desktop shows no wallpaper, as a remote desktop client can ask: the still picture is
+    /// not seen, so the live window covers the whole monitor and draws all of it.
+    fn wallpaper_hidden(&self) -> bool {
+        false
+    }
 }
 
 /// The machine and its desktop.
@@ -125,8 +130,8 @@ pub trait Platform {
     type Display: Display;
     fn open() -> Result<Self::Display, String>;
     fn power() -> Power;
-    /// Whether a viewer is connected to a VNC server on this TCP port.
-    fn vnc_connected(port: u16) -> bool;
+    /// Whether a client is connected to a server on this local TCP port (a VNC viewer, a remote desktop client).
+    fn port_connected(port: u16) -> bool;
     /// (idle, total) CPU time so far, in any unit.
     fn cpu_times() -> Option<(u64, u64)>;
     /// (memory used, swap used), in percent.

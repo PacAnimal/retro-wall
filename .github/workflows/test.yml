@@ -172,6 +172,8 @@ jobs:
       - name: The cross-building image
         run: docker build -t rwall-win ci/windows
       - run: ci/windows/cargo build --release
+      - name: Its manifest is linked in (without it a Windows 11 24H2 desktop refuses its windows)
+        run: grep -q '8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a' target/x86_64-pc-windows-gnu/release/retro-wall.exe
       - name: The tests build for Windows too (they run on Linux and macOS)
         run: ci/windows/cargo test --release --no-run
       - run: ci/windows/cargo clippy --release --all-targets -- -D warnings
@@ -197,3 +199,29 @@ jobs:
           $v = (Get-Content $out -Raw).Trim()
           Write-Output $v
           if ($v -notmatch '^retro-wall \d') { throw "unexpected: $v" }
+      - name: Windows finds its manifest, and it names Windows 10 and 11
+        shell: pwsh
+        run: |
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class Res {
+              [DllImport("kernel32", SetLastError = true, CharSet = CharSet.Unicode)] public static extern IntPtr LoadLibraryExW(string path, IntPtr file, uint flags);
+              [DllImport("kernel32", SetLastError = true)] public static extern IntPtr FindResourceW(IntPtr module, IntPtr name, IntPtr type);
+              [DllImport("kernel32", SetLastError = true)] public static extern IntPtr LoadResource(IntPtr module, IntPtr res);
+              [DllImport("kernel32", SetLastError = true)] public static extern IntPtr LockResource(IntPtr data);
+              [DllImport("kernel32", SetLastError = true)] public static extern uint SizeofResource(IntPtr module, IntPtr res);
+          }
+          '@
+          # as a data file: resource 1 of type 24 (RT_MANIFEST), the one Windows reads when it starts the exe
+          $m = [Res]::LoadLibraryExW((Resolve-Path .\retro-wall.exe).Path, [IntPtr]::Zero, 2)
+          if ($m -eq [IntPtr]::Zero) { throw "retro-wall.exe will not load as a data file" }
+          $r = [Res]::FindResourceW($m, [IntPtr]1, [IntPtr]24)
+          if ($r -eq [IntPtr]::Zero) { throw "retro-wall.exe has no manifest" }
+          $size = [Res]::SizeofResource($m, $r)
+          $bytes = New-Object byte[] $size
+          [Runtime.InteropServices.Marshal]::Copy([Res]::LockResource([Res]::LoadResource($m, $r)), $bytes, 0, $size)
+          $xml = [xml][Text.Encoding]::UTF8.GetString($bytes)
+          $os = $xml.assembly.compatibility.application.supportedOS.Id
+          Write-Output "supportedOS: $($os -join ' ')"
+          if ($os -notcontains '{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}') { throw "the manifest does not name Windows 10 and 11" }

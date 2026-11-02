@@ -70,7 +70,7 @@ unsafe impl TcpRow for MIB_TCPROW_OWNER_PID {}
 unsafe impl TcpRow for MIB_TCP6ROW_OWNER_PID {}
 
 /// Whether a TCP connection to local `port` is established, over IPv4 or IPv6.
-pub fn vnc_connected(port: u16) -> bool {
+pub fn port_connected(port: u16) -> bool {
     let local = |p: u32| u16::from_be(p as u16) == port;
     let v4 = tcp_table(AF_INET).is_some_and(|t| {
         let rows = rows_of::<MIB_TCPROW_OWNER_PID>(&t);

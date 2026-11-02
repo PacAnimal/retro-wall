@@ -155,7 +155,7 @@ static TABLE_HIDDEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBo
 
 /// Whether a viewer is connected to local TCP `port`: netstat's table where it is visible; else, for
 /// 5900, whether Screen Sharing's server runs (launchd starts it when a viewer connects).
-pub fn vnc_connected(port: u16) -> bool {
+pub fn port_connected(port: u16) -> bool {
     use std::sync::atomic::Ordering::Relaxed;
     if !TABLE_HIDDEN.load(Relaxed) {
         if let Ok(o) = std::process::Command::new("/usr/sbin/netstat").args(["-anp", "tcp"]).stderr(std::process::Stdio::null()).output() {
