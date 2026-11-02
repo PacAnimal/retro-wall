@@ -38,9 +38,28 @@ pub fn daytime() -> f64 {
     (((now + off).rem_euclid(86400)) as f64) / 86400.0
 }
 
-/// The local zone's current UTC offset in seconds, from /etc/localtime (TZif); 0 when unreadable.
+/// The local zone's current UTC offset in seconds: from the zone file TZ names (`Europe/Oslo`,
+/// `:Europe/Oslo`, or a path), else from /etc/localtime (TZif); 0 when neither reads.
 fn local_offset(now: i64) -> i64 {
-    std::fs::read("/etc/localtime").ok().and_then(|d| tz_offset(&d, now)).unwrap_or(0)
+    let named = std::env::var_os("TZ").and_then(|tz| zone_file(&tz.to_string_lossy()));
+    named.into_iter().chain([std::path::PathBuf::from("/etc/localtime")]).find_map(|p| std::fs::read(p).ok().and_then(|d| tz_offset(&d, now))).unwrap_or(0)
+}
+
+/// The zone file a TZ value names: a path as it is, a zone's name under the system's zone directory;
+/// None for an empty value, a POSIX rule (`CET-1CEST`, read by no file) or a name that climbs out.
+pub fn zone_file(tz: &str) -> Option<std::path::PathBuf> {
+    let name = tz.strip_prefix(':').unwrap_or(tz);
+    if name.is_empty() {
+        return None;
+    }
+    if name.starts_with('/') {
+        return Some(name.into());
+    }
+    if name.split('/').any(|part| part.is_empty() || part == "..") {
+        return None;
+    }
+    let p = std::path::Path::new("/usr/share/zoneinfo").join(name);
+    p.is_file().then_some(p)
 }
 
 /// The UTC offset at `now` in a TZif file; None for a file that is not one or is cut short.
@@ -136,6 +155,17 @@ mod tests {
             assert!(tz_offset(&d[..n], 2000).is_none_or(|o| o == 7200), "cut at {n}");
         }
         assert_eq!(tz_offset(b"NotAZoneFile", 0), None);
+    }
+
+    #[test]
+    fn tz_names_a_zone_file() {
+        assert_eq!(zone_file(""), None);
+        assert_eq!(zone_file(":"), None);
+        assert_eq!(zone_file("/some/where"), Some("/some/where".into()));
+        assert_eq!(zone_file(":/some/where"), Some("/some/where".into()));
+        assert_eq!(zone_file("../../etc/passwd"), None);
+        assert_eq!(zone_file("Europe//Oslo"), None);
+        assert_eq!(zone_file("CET-1CEST,M3.5.0,M10.5.0/3"), None);
     }
 
     #[test]

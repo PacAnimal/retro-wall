@@ -242,7 +242,7 @@ fn broken_letterings_fail_the_trial() {
 fn hostile_element_settings_are_refused_or_draw() {
     let mut cases: Vec<(String, String, String, Value)> = vec![];
     let mut seen = std::collections::HashSet::new();
-    for base in ["phosphor", "neon_rain", "night_city", "winter", "guybrush", "matrix", "aurora", "copperworks"] {
+    for base in ["phosphor", "neon_rain", "night_city", "winter", "guybrush", "matrix", "aurora", "copperworks", "racing"] {
         let l = resolve(&bundled(base)).unwrap();
         for e in &l.plain.scene {
             if !seen.insert(e.kind.clone()) {

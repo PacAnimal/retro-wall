@@ -53,6 +53,11 @@ fn copperworks() {
 }
 
 #[test]
+fn racing() {
+    draws("racing");
+}
+
+#[test]
 fn guybrush() {
     draws("guybrush");
 }
@@ -91,7 +96,7 @@ fn every_bundled_theme_has_a_test() {
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
     names.sort();
-    assert_eq!(names, ["aurora", "copperworks", "guybrush", "matrix", "neon_rain", "night_city", "phosphor", "winter"]);
+    assert_eq!(names, ["aurora", "copperworks", "guybrush", "matrix", "neon_rain", "night_city", "phosphor", "racing", "winter"]);
 }
 
 #[test]
@@ -221,7 +226,7 @@ fn a_config_that_is_not_toml_is_an_error() {
 #[test]
 fn every_bundled_theme_loads_under_a_broken_config() {
     let cfg = broken_config("config-themes");
-    for name in ["aurora", "copperworks", "guybrush", "matrix", "neon_rain", "night_city", "phosphor", "winter"] {
+    for name in ["aurora", "copperworks", "guybrush", "matrix", "neon_rain", "night_city", "phosphor", "racing", "winter"] {
         let l = config::load(&bundled(name), &cfg, elements::kind_info, false).unwrap_or_else(|e| panic!("{name}: {e}"));
         let said = l.problems.join("\n");
         for what in

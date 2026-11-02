@@ -48,6 +48,8 @@ pub enum Kind {
     Label,
     /// Filtered, drawn scaled.
     Smooth,
+    /// Pixel art: each texel a sharp square however large it is drawn; mipmapped when drawn smaller.
+    Pixel,
 }
 
 /// The most bytes handed to the driver in one upload.
@@ -107,6 +109,8 @@ struct Custom {
 }
 
 struct Cmd {
+    /// The render target drawn into (`Gfx::target`); None for the window.
+    target: Option<Tex>,
     custom: Option<usize>,
     tex: Option<Tex>,
     mask: Option<Mask>,
@@ -122,6 +126,8 @@ struct Texture {
     h: i32,
     /// Where a Layer's pixels stand in the picture: x, y, w, h.
     place: (f64, f64, f64, f64),
+    /// The framebuffer drawing into it, for a render target (`Gfx::render_target`); 0 for none.
+    fbo: GLuint,
 }
 
 /// Where a surface's pixels start, flushed, for GL to copy from: stride x height bytes; None for a
@@ -144,6 +150,10 @@ pub struct Gfx {
     verts: Vec<f32>,
     cmds: Vec<Cmd>,
     scissor: Option<(i32, i32, i32, i32)>,
+    /// Where draws go now: a render target, or the window.
+    target: Option<Tex>,
+    /// Whether the driver has framebuffer objects, for render targets.
+    fbos: bool,
     customs: Vec<Custom>,
     uniforms: Vec<Uniform>,
     samplers: Vec<(GLint, Tex)>,
@@ -291,6 +301,8 @@ impl Gfx {
         let major: u32 = gl_string(gl::VERSION).split(|c: char| !c.is_ascii_digit()).next().and_then(|m| m.parse().ok()).unwrap_or(1);
         let ext = if core { String::new() } else { gl_string(gl::EXTENSIONS) };
         let mipmaps = core || major >= 3 || ext.contains("GL_ARB_framebuffer_object") || ext.contains("GL_EXT_framebuffer_object");
+        // render targets need the core names of the framebuffer calls: GL 3, or the ARB extension
+        let fbos = core || major >= 3 || ext.contains("GL_ARB_framebuffer_object");
         // SAFETY: made with its window's context current (the caller's duty, as for every method); the
         // attribute offsets lie within a 32-byte vertex, read from the bound vertex buffer.
         unsafe {
@@ -325,6 +337,8 @@ impl Gfx {
                 verts: Vec::with_capacity(1 << 16),
                 cmds: vec![],
                 scissor: None,
+                target: None,
+                fbos,
                 customs: vec![],
                 uniforms: vec![],
                 samplers: vec![],
@@ -364,7 +378,7 @@ impl Gfx {
         // SAFETY: its window's context is current; one name written to `id`.
         unsafe { gl::GenTextures(1, &mut id) };
         let t = Tex(self.textures.len() as u32);
-        self.textures.push(Texture { id, w: 0, h: 0, place: (0.0, 0.0, 0.0, 0.0) });
+        self.textures.push(Texture { id, w: 0, h: 0, place: (0.0, 0.0, 0.0, 0.0), fbo: 0 });
         self.replace_region(t, s, kind, region);
         t
     }
@@ -401,7 +415,7 @@ impl Gfx {
             }
         };
         let stride = src.stride() as usize;
-        let mipmaps = matches!(kind, Kind::Sprite | Kind::Tile);
+        let mipmaps = matches!(kind, Kind::Sprite | Kind::Tile | Kind::Pixel);
         // SAFETY: a GL context is current, and no pixel unpack buffer is bound, so GL copies from
         // `data` before each call returns. `data` starts `src`'s stride x height bytes (`pixel_start`),
         // which `src` keeps alive and unchanged meanwhile (see `pixel_start`); every pointer handed to GL
@@ -412,6 +426,7 @@ impl Gfx {
                 Kind::Sprite => (gl::LINEAR_MIPMAP_LINEAR, gl::LINEAR, gl::CLAMP_TO_EDGE),
                 Kind::Tile => (gl::LINEAR_MIPMAP_LINEAR, gl::LINEAR, gl::REPEAT),
                 Kind::Smooth => (gl::LINEAR, gl::LINEAR, gl::CLAMP_TO_EDGE),
+                Kind::Pixel => (gl::LINEAR_MIPMAP_NEAREST, gl::NEAREST, gl::CLAMP_TO_EDGE),
                 Kind::Layer | Kind::Label => (gl::NEAREST, gl::NEAREST, gl::CLAMP_TO_EDGE),
             };
             if mipmaps && !self.mipmaps {
@@ -457,6 +472,49 @@ impl Gfx {
         }
     }
 
+    /// A texture `w` x `h` that draws can go into (`target`), its texels sampled sharp, for a picture
+    /// drawn small and shown large through a shader of its own. None where the driver has no
+    /// framebuffer objects.
+    pub fn render_target(&mut self, w: i32, h: i32) -> Option<Tex> {
+        if !self.fbos || w <= 0 || h <= 0 {
+            return None;
+        }
+        // SAFETY: its window's context is current; the texture and framebuffer are this call's own, the
+        // texture's storage made with no data; both are deleted if the framebuffer is not complete.
+        unsafe {
+            let (mut id, mut fbo) = (0, 0);
+            gl::GenTextures(1, &mut id);
+            gl::BindTexture(gl::TEXTURE_2D, id);
+            gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA as i32, w, h, 0, gl::BGRA, gl::UNSIGNED_BYTE, std::ptr::null());
+            for (k, v) in [
+                (gl::TEXTURE_MIN_FILTER, gl::NEAREST),
+                (gl::TEXTURE_MAG_FILTER, gl::NEAREST),
+                (gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE),
+                (gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE),
+            ] {
+                gl::TexParameteri(gl::TEXTURE_2D, k, v as i32);
+            }
+            gl::GenFramebuffers(1, &mut fbo);
+            gl::BindFramebuffer(gl::FRAMEBUFFER, fbo);
+            gl::FramebufferTexture2D(gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, id, 0);
+            let complete = gl::CheckFramebufferStatus(gl::FRAMEBUFFER) == gl::FRAMEBUFFER_COMPLETE;
+            gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
+            if !complete {
+                gl::DeleteFramebuffers(1, &fbo);
+                gl::DeleteTextures(1, &id);
+                return None;
+            }
+            self.textures.push(Texture { id, w, h, place: (0.0, 0.0, w as f64, h as f64), fbo });
+            Some(Tex(self.textures.len() as u32 - 1))
+        }
+    }
+
+    /// Draw into a render target (`render_target`) from now on: the pane, scaled to fill it; or into
+    /// the window again (None).
+    pub fn target(&mut self, t: Option<Tex>) {
+        self.target = t.filter(|t| self.textures.get(t.0 as usize).is_some_and(|tx| tx.fbo != 0));
+    }
+
     /// Clip to a rectangle in GL window coordinates (from the bottom), or no clip.
     pub fn scissor(&mut self, rect: Option<(i32, i32, i32, i32)>) {
         self.scissor = rect;
@@ -475,12 +533,13 @@ impl Gfx {
             && last.mask == mask
             && last.blend == blend
             && last.scissor == self.scissor
+            && last.target == self.target
             && last.first + last.count == first
         {
             last.count += quads;
             return;
         }
-        self.cmds.push(Cmd { custom: None, tex, mask, blend, scissor: self.scissor, first, count: quads });
+        self.cmds.push(Cmd { target: self.target, custom: None, tex, mask, blend, scissor: self.scissor, first, count: quads });
     }
 
     fn corner(&mut self, u: f64, v: f64, rgba: [f32; 4], x: f64, y: f64) {
@@ -652,7 +711,7 @@ impl Gfx {
         self.corner(1.0, 1.0, c, x1, y1);
         self.corner(0.0, 1.0, c, x0, y1);
         self.customs.push(custom);
-        self.cmds.push(Cmd { custom: Some(self.customs.len() - 1), tex: None, mask: None, blend, scissor: self.scissor, first, count: 1 });
+        self.cmds.push(Cmd { target: self.target, custom: Some(self.customs.len() - 1), tex: None, mask: None, blend, scissor: self.scissor, first, count: 1 });
     }
 
     /// Indices for at least `quads` quads: corners (0, 1, 3) and (1, 2, 3) of each.
@@ -688,8 +747,22 @@ impl Gfx {
             gl::BindBuffer(gl::ARRAY_BUFFER, self.vbo);
             gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, self.ibo);
             gl::BufferData(gl::ARRAY_BUFFER, (self.verts.len() * 4) as isize, self.verts.as_ptr() as *const _, gl::STREAM_DRAW);
-            let (mut blend, mut tex, mut sc) = (None, None, None);
+            let (mut blend, mut tex, mut sc, mut into) = (None, None, None, None);
             for c in &self.cmds {
+                if into != Some(c.target) {
+                    // the pane maps onto the whole of what is drawn into, so a target's viewport is all of it
+                    match c.target.map(|t| &self.textures[t.0 as usize]) {
+                        Some(tx) => {
+                            gl::BindFramebuffer(gl::FRAMEBUFFER, tx.fbo);
+                            gl::Viewport(0, 0, tx.w, tx.h);
+                        }
+                        None => {
+                            gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
+                            gl::Viewport(0, 0, self.rect.2, self.rect.3);
+                        }
+                    }
+                    into = Some(c.target);
+                }
                 if blend != Some(c.blend) {
                     match c.blend {
                         Blend::Opaque => gl::Disable(gl::BLEND),
@@ -774,6 +847,10 @@ impl Gfx {
                 gl::DrawElements(gl::TRIANGLES, (c.count * 6) as i32, gl::UNSIGNED_INT, at);
             }
             gl::Disable(gl::SCISSOR_TEST);
+            if into.flatten().is_some() {
+                gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
+                gl::Viewport(0, 0, self.rect.2, self.rect.3);
+            }
         }
         self.verts.clear();
         self.cmds.clear();
@@ -781,6 +858,7 @@ impl Gfx {
         self.uniforms.clear();
         self.samplers.clear();
         self.scissor = None;
+        self.target = None;
     }
 
     /// The back buffer's pixels, top row first, BGRA.
