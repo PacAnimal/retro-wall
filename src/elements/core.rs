@@ -439,8 +439,8 @@ impl Tubes {
 }
 
 impl Part for Tubes {
-    fn shows(&self) -> Option<Piece> {
-        Some(Piece::Title)
+    fn shows(&self) -> Header {
+        Header::of(Piece::Title)
     }
     fn live(&self) -> bool {
         self.flicker
@@ -494,8 +494,8 @@ impl Part for Tubes {
 pub struct Caption;
 
 impl Part for Caption {
-    fn shows(&self) -> Option<Piece> {
-        Some(Piece::Title)
+    fn shows(&self) -> Header {
+        Header::of(Piece::Title)
     }
     fn still(&self) -> bool {
         true
@@ -518,8 +518,8 @@ impl Part for Caption {
 pub struct Solid;
 
 impl Part for Solid {
-    fn shows(&self) -> Option<Piece> {
-        Some(Piece::Title)
+    fn shows(&self) -> Header {
+        Header::of(Piece::Title)
     }
     fn still(&self) -> bool {
         true
@@ -616,8 +616,8 @@ impl Ticks {
 }
 
 impl Part for Ticks {
-    fn shows(&self) -> Option<Piece> {
-        Some(Piece::Title)
+    fn shows(&self) -> Header {
+        Header::of(Piece::Title)
     }
     fn live(&self) -> bool {
         true

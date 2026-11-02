@@ -126,11 +126,14 @@ impl Monitor {
         let core = d.core(window);
         let gfx = Gfx::new(rect, core, textures);
         crate::outln!(
-            "{}: {} at {}x{} from row {head}, {} textures, made in {:.2} s, on {} ({})",
+            "{}: {} at {}x{}+{}+{}, showing {}; from row {head}, {} textures, made in {:.2} s, on {} ({})",
             s.name,
             geo.th.name,
             geo.w,
             geo.h,
+            s.x,
+            s.y,
+            geo.header,
             uploads,
             t0.elapsed().as_secs_f64(),
             d.renderer(),
@@ -238,10 +241,10 @@ fn world(th: &Theme, frozen: Option<Frozen>, demo: bool) -> World {
 /// The header pieces monitor `name` shows. Alone (the one monitor driven)
 /// it shows all of them that the theme does not turn off. Among `monitors`, as [monitors] chooses:
 /// "rightmost" (by right edge, the upper on a tie; the default), "leftmost", "primary", "all", "none",
-/// or a list of names.
+/// or a list of names, each piece by its own rule (the status line by the widgets' when it has none).
 pub fn header(rules: &Monitors, name: &str, monitors: &[Screen], alone: bool) -> Header {
     let mut out = Header::NONE;
-    for (part, choice) in [(Piece::Title, &rules.title), (Piece::Widgets, &rules.widgets), (Piece::Graph, &rules.graph)] {
+    for (part, choice) in rules.rules() {
         let shows = match choice {
             Choice::Rule(Rule::None) => false,
             _ if alone => true,

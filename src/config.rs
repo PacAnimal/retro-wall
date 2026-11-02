@@ -2,6 +2,7 @@
 //! set the palette's roles (or turn its hue), tweak the core and name its scene's elements, bottom to top.
 //! Everything is checked when it loads: a broken theme or config is reported, never a crash.
 
+use crate::scene::Piece;
 use crate::tweaks::{Colour, Tweaks};
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashMap};
@@ -85,6 +86,8 @@ pub enum Rule {
     None,
 }
 
+/// Where each header piece shows, among the monitors driven. Each piece is placed alone: a theme can
+/// put its hostname on one monitor, its instruments on another and its graph on every one.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Monitors {
@@ -94,6 +97,9 @@ pub struct Monitors {
     pub widgets: Choice,
     #[serde(default = "rightmost")]
     pub graph: Choice,
+    /// The network's status line. Unset: where the widgets are.
+    #[serde(default)]
+    pub status: Option<Choice>,
 }
 
 fn rightmost() -> Choice {
@@ -102,7 +108,19 @@ fn rightmost() -> Choice {
 
 impl Default for Monitors {
     fn default() -> Self {
-        Monitors { title: rightmost(), widgets: rightmost(), graph: rightmost() }
+        Monitors { title: rightmost(), widgets: rightmost(), graph: rightmost(), status: None }
+    }
+}
+
+impl Monitors {
+    /// Each piece and the rule that places it.
+    pub fn rules(&self) -> [(Piece, &Choice); 4] {
+        [
+            (Piece::Title, &self.title),
+            (Piece::Widgets, &self.widgets),
+            (Piece::Graph, &self.graph),
+            (Piece::Status, self.status.as_ref().unwrap_or(&self.widgets)),
+        ]
     }
 }
 
@@ -630,7 +648,7 @@ pub fn read_config(path: Option<&str>) -> R<Config> {
             Ok(_) => {
                 monitors.insert(k.clone(), v.clone());
             }
-            Err(_) if ["title", "widgets", "graph"].contains(&k.as_str()) => {
+            Err(_) if ["title", "widgets", "graph", "status"].contains(&k.as_str()) => {
                 l.note(format!("{at}: monitors.{k} is {v}: it takes rightmost, leftmost, primary, all, none, or a list of monitors' names"))
             }
             Err(e) => l.note(e),

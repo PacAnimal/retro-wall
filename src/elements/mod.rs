@@ -122,7 +122,7 @@ pub fn build(g: &Geo) -> Vec<Box<dyn Part>> {
     for e in &g.th.scene {
         let Some((k, _)) = find(&e.kind) else { continue };
         match (k.make)(&e.name, &e.settings, g) {
-            Ok(made) => parts.extend(made.into_iter().filter(|p| p.shows().is_none_or(|s| g.header.contains(s)))),
+            Ok(made) => parts.extend(made.into_iter().filter(|p| p.shows() == Header::NONE || p.shows().meets(g.header))),
             Err(why) => crate::errln!("element.{}: {why}: left out", e.name),
         }
     }
@@ -138,7 +138,7 @@ pub fn trial(th: &Arc<Theme>) -> Result<(), String> {
         let Some((k, _)) = find(&e.kind) else { return Err(format!("element.{}: no kind {:?}", e.name, e.kind)) };
         let parts = (k.make)(&e.name, &e.settings, &g).map_err(|why| format!("element.{}: {why}", e.name))?;
         if first.is_none() {
-            first = parts.first().map(|p| p.shows().is_none() && p.passes().first() == Some(&Pass::Still(0)));
+            first = parts.first().map(|p| p.shows() == Header::NONE && p.passes().first() == Some(&Pass::Still(0)));
         }
     }
     built();

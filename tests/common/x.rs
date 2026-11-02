@@ -39,17 +39,7 @@ impl Xvfb {
     /// The binary on this display, with a home of its own (no user's config), the bundled themes and
     /// software GL.
     pub fn retro_wall(&self, home: &Path) -> Command {
-        std::fs::create_dir_all(home).unwrap();
-        let mut c = Command::new(env!("CARGO_BIN_EXE_retro-wall"));
-        c.env("DISPLAY", &self.display)
-            .env("HOME", home)
-            .env_remove("XDG_CONFIG_HOME")
-            .env_remove("XDG_CACHE_HOME")
-            .env_remove("RETRO_GL")
-            .env("RETRO_THEMES", Path::new(env!("CARGO_MANIFEST_DIR")).join("themes"))
-            .env("LIBGL_ALWAYS_SOFTWARE", "1")
-            .stdin(Stdio::null());
-        c
+        wall_on(&self.display, home)
     }
 }
 
@@ -57,6 +47,199 @@ impl Drop for Xvfb {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+    }
+}
+
+/// The binary on `display`, with a home of its own (no user's config), the bundled themes and software GL.
+fn wall_on(display: &str, home: &Path) -> Command {
+    std::fs::create_dir_all(home).unwrap();
+    let mut c = Command::new(env!("CARGO_BIN_EXE_retro-wall"));
+    c.env("DISPLAY", display)
+        .env("HOME", home)
+        .env_remove("XDG_CONFIG_HOME")
+        .env_remove("XDG_CACHE_HOME")
+        .env_remove("RETRO_GL")
+        .env("RETRO_THEMES", Path::new(env!("CARGO_MANIFEST_DIR")).join("themes"))
+        .env("LIBGL_ALWAYS_SOFTWARE", "1")
+        .stdin(Stdio::null());
+    c
+}
+
+/// Where a monitor is on the desktop: its output (DUMMY0 to DUMMY3), x, y, width, height.
+pub type Output = (&'static str, i32, i32, i32, i32);
+
+/// The outputs `layout` turns on and off.
+const OUTPUTS: [&str; 4] = ["DUMMY0", "DUMMY1", "DUMMY2", "DUMMY3"];
+
+/// A virtual X server of several monitors, each a RandR output as a graphics card has: Xorg on its dummy
+/// driver, run as the test's user. Xvfb has no outputs, so it is always one monitor. Stopped when dropped.
+pub struct Monitors {
+    child: Child,
+    pub display: String,
+    dir: std::path::PathBuf,
+}
+
+impl Monitors {
+    /// The server, its outputs laid out as `outputs`. None, said on stderr, when Xorg, its dummy
+    /// driver, xrandr or xwd is missing: the test is then skipped, unless RETRO_REQUIRE_XVFB is set (as
+    /// in CI), when it fails.
+    pub fn start(test: &str, outputs: &[Output]) -> Option<Monitors> {
+        let xorg = ["/usr/lib/xorg/Xorg", "/usr/libexec/Xorg", "/usr/bin/Xorg"].into_iter().find(|p| Path::new(p).is_file());
+        let dummy = ["/usr/lib/xorg/modules/drivers/dummy_drv.so", "/usr/lib64/xorg/modules/drivers/dummy_drv.so"].iter().any(|p| Path::new(p).is_file());
+        let tools = ["xrandr", "xwd"].iter().all(|t| Command::new(t).arg("-help").stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok());
+        let Some(xorg) = xorg.filter(|_| dummy && tools) else {
+            assert!(std::env::var_os("RETRO_REQUIRE_XVFB").is_none(), "{test}: Xorg's dummy driver, xrandr and xwd are required here");
+            let _ = writeln!(
+                std::io::stderr(),
+                "{test}: SKIPPED: no Xorg dummy driver, xrandr or xwd; install them (xserver-xorg-video-dummy, x11-xserver-utils, x11-apps) to run this test"
+            );
+            return None;
+        };
+        let dir = std::env::temp_dir().join(format!("retro-wall-test-xorg-{test}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let conf = dir.join("xorg.conf");
+        std::fs::write(&conf, DUMMY_CONF).unwrap();
+        let spawned = Command::new(xorg)
+            .args(["-displayfd", "1", "-noreset", "-nolisten", "tcp", "-config"])
+            .arg(&conf)
+            .arg("-logfile")
+            .arg(dir.join("xorg.log"))
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn();
+        let mut child = spawned.unwrap_or_else(|e| panic!("{test}: Xorg will not start: {e}"));
+        let mut line = String::new();
+        let _ = BufReader::new(child.stdout.take().expect("Xorg's stdout")).read_line(&mut line);
+        let n: u32 = line.trim().parse().unwrap_or_else(|_| panic!("{test}: Xorg gave no display number (its log: {})", dir.join("xorg.log").display()));
+        let m = Monitors { child, display: format!(":{n}"), dir };
+        m.layout(outputs);
+        Some(m)
+    }
+
+    /// Lay the monitors out as `outputs`, as plugging, unplugging and moving them does; the others off.
+    pub fn layout(&self, outputs: &[Output]) {
+        for &(out, _, _, w, h) in outputs {
+            let mode = format!("{w}x{h}");
+            // a mode for the size; made again for another output, which xrandr refuses harmlessly
+            let (hs, he, ht, vs, ve, vt) = (w + 48, w + 80, w + 160, h + 3, h + 8, h + 40);
+            let clock = format!("{:.2}", (ht * vt) as f64 * 60.0 / 1e6);
+            let nums: Vec<String> = [w, hs, he, ht, h, vs, ve, vt].iter().map(|v| v.to_string()).collect();
+            let _ = self.xrandr(&[&["--newmode", &mode, &clock], &nums.iter().map(String::as_str).collect::<Vec<_>>()[..], &["-hsync", "+vsync"]].concat());
+            let _ = self.xrandr(&["--addmode", out, &mode]);
+        }
+        let mut args: Vec<String> = vec![];
+        for out in OUTPUTS {
+            args.extend(["--output".into(), out.into()]);
+            match outputs.iter().find(|o| o.0 == out) {
+                Some(&(_, x, y, w, h)) => args.extend(["--mode".into(), format!("{w}x{h}"), "--pos".into(), format!("{x}x{y}")]),
+                None => args.push("--off".into()),
+            }
+        }
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        assert!(self.xrandr(&args), "xrandr {}: refused", args.join(" "));
+    }
+
+    fn xrandr(&self, args: &[&str]) -> bool {
+        Command::new("xrandr").env("DISPLAY", &self.display).args(args).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success())
+    }
+
+    pub fn retro_wall(&self, home: &Path) -> Command {
+        wall_on(&self.display, home)
+    }
+
+    /// What the whole desktop shows now.
+    pub fn dump(&self) -> Dump {
+        let out = Command::new("xwd").env("DISPLAY", &self.display).args(["-root", "-silent"]).output().expect("xwd runs");
+        assert!(out.status.success(), "xwd failed");
+        Dump::from_xwd(&out.stdout)
+    }
+}
+
+impl Drop for Monitors {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+/// The dummy driver's card: four outputs; a desktop up to 4096 x 2048.
+const DUMMY_CONF: &str = r#"
+Section "ServerFlags"
+    Option "AutoAddDevices" "false"
+    Option "AutoAddGPU" "false"
+    Option "AutoBindGPU" "false"
+EndSection
+Section "Device"
+    Identifier "card"
+    Driver "dummy"
+    VideoRam 65536
+EndSection
+Section "Screen"
+    Identifier "screen"
+    Device "card"
+    DefaultDepth 24
+    SubSection "Display"
+        Depth 24
+        Virtual 4096 2048
+    EndSubSection
+EndSection
+"#;
+
+/// A screen dump: width, height, and (r, g, b) by row.
+pub struct Dump {
+    pub w: usize,
+    pub h: usize,
+    pub px: Vec<[u8; 3]>,
+}
+
+impl Dump {
+    /// From xwd's output: a ZPixmap of 24 or 32 bits a pixel, true colour.
+    pub fn from_xwd(data: &[u8]) -> Dump {
+        let field = |i: usize| -> usize { u32::from_be_bytes(data[i * 4..i * 4 + 4].try_into().unwrap()) as usize };
+        let (header, format, w, h) = (field(0), field(2), field(4), field(5));
+        let (little, bpp, line) = (field(7) == 0, field(11), field(12));
+        let masks = [field(14) as u32, field(15) as u32, field(16) as u32];
+        assert!(format == 2 && (bpp == 24 || bpp == 32), "xwd: format {format}, {bpp} bits a pixel: only ZPixmap of 24 or 32");
+        let start = header + field(19) * 12;
+        let step = bpp / 8;
+        let mut px = Vec::with_capacity(w * h);
+        for y in 0..h {
+            for x in 0..w {
+                let b = &data[start + y * line + x * step..][..step];
+                let v = (0..step).fold(0u32, |v, k| v << 8 | if little { b[step - 1 - k] } else { b[k] } as u32);
+                px.push(masks.map(|m| ((v & m) >> m.trailing_zeros()) as u8));
+            }
+        }
+        Dump { w, h, px }
+    }
+
+    /// Written as a PNG, to be looked at when a test fails.
+    pub fn save(&self, path: &Path) {
+        let mut s = cairo::ImageSurface::create(cairo::Format::Rgb24, self.w as i32, self.h as i32).unwrap();
+        let stride = s.stride() as usize;
+        {
+            let mut d = s.data().unwrap();
+            for (i, [r, g, b]) in self.px.iter().copied().enumerate() {
+                let at = (i / self.w) * stride + (i % self.w) * 4;
+                d[at..at + 4].copy_from_slice(&[b, g, r, 255]);
+            }
+        }
+        s.write_to_png(&mut std::fs::File::create(path).unwrap()).unwrap();
+    }
+
+    /// Of the pixels in the rectangle (x, y, w, h), the share that differ from `other`'s by more than
+    /// 24 in a channel.
+    pub fn differ(&self, other: &Dump, (x, y, w, h): (i32, i32, i32, i32)) -> f64 {
+        let mut n = 0usize;
+        for r in y as usize..(y + h) as usize {
+            for c in x as usize..(x + w) as usize {
+                let (a, b) = (self.px[r * self.w + c], other.px[r * other.w + c]);
+                n += a.iter().zip(b).any(|(p, q)| p.abs_diff(q) > 24) as usize;
+            }
+        }
+        n as f64 / (w * h) as f64
     }
 }
 

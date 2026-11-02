@@ -299,6 +299,10 @@ impl Instruments {
             for n in &gr.widgets {
                 let spec = th.widgets.get(n);
                 let kind = spec.and_then(|t| t.get("type")).and_then(|t| t.as_str()).unwrap_or(n);
+                // the status line is a header piece of its own: a theme can show it apart from the rest
+                if !g.header.contains(if kind == "status" { Piece::Status } else { Piece::Widgets }) {
+                    continue;
+                }
                 match widget(th, n, kind, spec.unwrap_or(&Table::new()), &faces) {
                     Ok(mut w) => {
                         w.base_mut().anchor = gr.anchor;
@@ -428,8 +432,8 @@ fn least(ys: impl Iterator<Item = f64>) -> Option<f64> {
 }
 
 impl Part for Instruments {
-    fn shows(&self) -> Option<Piece> {
-        Some(Piece::Widgets)
+    fn shows(&self) -> Header {
+        Header::of(Piece::Widgets).with(Piece::Status)
     }
     fn passes(&self) -> &'static [Pass] {
         PASSES

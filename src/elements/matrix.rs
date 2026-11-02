@@ -633,8 +633,8 @@ pub struct CodeTitle {
 }
 
 impl Part for CodeTitle {
-    fn shows(&self) -> Option<Piece> {
-        Some(Piece::Title)
+    fn shows(&self) -> Header {
+        Header::of(Piece::Title)
     }
     fn still(&self) -> bool {
         true
