@@ -239,8 +239,21 @@ fn svg_traced<'a>(traced: &'a mut HashMap<String, Option<cairo::Path>>, d: &str)
     traced[d].as_ref()
 }
 
-const INHERITED: &[&str] =
-    &["fill", "stroke", "stroke-width", "stroke-linejoin", "fill-rule", "shape-rendering", "fill-opacity", "stroke-opacity", "stop-color"];
+const INHERITED: &[&str] = &[
+    "fill",
+    "stroke",
+    "stroke-width",
+    "stroke-linejoin",
+    "fill-rule",
+    "shape-rendering",
+    "fill-opacity",
+    "stroke-opacity",
+    "stop-color",
+    "font-size",
+    "font-weight",
+    "text-anchor",
+    "letter-spacing",
+];
 
 /// The id in url(#id); "" if it is not one.
 fn url_id(v: &str) -> &str {
@@ -279,6 +292,12 @@ impl<'a, 'c> Drawer<'a, 'c> {
             }
             let f = |k: &str, d: f64| g.attribute(k).map_or(d, number);
             let lg = LinearGradient::new(f("x1", 0.0), f("y1", 0.0), f("x2", 1.0), f("y2", 0.0));
+            if g.attribute("gradientUnits") != Some("userSpaceOnUse") {
+                // the default, objectBoundingBox: 0 to 1 across the shape being painted, the path traced
+                let (x0, y0, x1, y1) = self.c.path_extents().unwrap_or((0.0, 0.0, 1.0, 1.0));
+                let (w, h) = ((x1 - x0).max(1e-9), (y1 - y0).max(1e-9));
+                lg.set_matrix(Matrix::new(1.0 / w, 0.0, 0.0, 1.0 / h, -x0 / w, -y0 / h));
+            }
             for stop in g.children().filter(|n| n.is_element()) {
                 if stop.tag_name().name() == "stop" {
                     let offset = stop.attribute("offset").unwrap_or("0");
@@ -305,10 +324,93 @@ impl<'a, 'c> Drawer<'a, 'c> {
                 }
             }
             "rect" => {
+                let f = |k: &str| e.attribute(k).map(number);
+                let (x, y, w, h) = (f("x").unwrap_or(0.0), f("y").unwrap_or(0.0), f("width").unwrap_or(0.0), f("height").unwrap_or(0.0));
+                // a corner's radii: either one given stands for both, each at most half its side
+                let (rx, ry) = match (f("rx"), f("ry")) {
+                    (Some(rx), Some(ry)) => (rx, ry),
+                    (Some(r), None) | (None, Some(r)) => (r, r),
+                    (None, None) => (0.0, 0.0),
+                };
+                let (rx, ry) = (rx.clamp(0.0, w / 2.0), ry.clamp(0.0, h / 2.0));
+                if rx > 0.0 && ry > 0.0 {
+                    self.ellipse_arcs(x, y, w, h, rx, ry);
+                } else {
+                    self.c.rectangle(x, y, w, h);
+                }
+            }
+            "circle" | "ellipse" => {
                 let f = |k: &str| e.attribute(k).map_or(0.0, number);
-                self.c.rectangle(f("x"), f("y"), f("width"), f("height"));
+                let (rx, ry) = if e.tag_name().name() == "circle" { (f("r"), f("r")) } else { (f("rx"), f("ry")) };
+                if rx > 0.0 && ry > 0.0 {
+                    self.ellipse_arcs(f("cx") - rx, f("cy") - ry, 2.0 * rx, 2.0 * ry, rx, ry);
+                }
+            }
+            "polygon" | "polyline" => {
+                let n: Vec<f64> =
+                    e.attribute("points").unwrap_or("").split(|ch: char| ch == ',' || ch.is_whitespace()).filter(|t| !t.is_empty()).map(number).collect();
+                for (i, p) in n.as_chunks::<2>().0.iter().enumerate() {
+                    if i == 0 { self.c.move_to(p[0], p[1]) } else { self.c.line_to(p[0], p[1]) }
+                }
+                if e.tag_name().name() == "polygon" && n.len() >= 4 {
+                    self.c.close_path();
+                }
             }
             _ => {}
+        }
+    }
+
+    /// A rectangle with its corners rounded by radii rx, ry: an ellipse when they are half its sides.
+    fn ellipse_arcs(&self, x: f64, y: f64, w: f64, h: f64, rx: f64, ry: f64) {
+        let c = self.c;
+        let _ = c.save();
+        c.translate(x, y);
+        c.scale(rx, ry);
+        let (w, h) = (w / rx, h / ry);
+        use std::f64::consts::{FRAC_PI_2, PI};
+        c.new_sub_path();
+        c.arc(w - 1.0, 1.0, 1.0, -FRAC_PI_2, 0.0);
+        c.arc(w - 1.0, h - 1.0, 1.0, 0.0, FRAC_PI_2);
+        c.arc(1.0, h - 1.0, 1.0, FRAC_PI_2, PI);
+        c.arc(1.0, 1.0, 1.0, PI, 1.5 * PI);
+        c.close_path();
+        let _ = c.restore();
+    }
+
+    /// A text element's letters, in the program's own monospace typeface whatever family it names:
+    /// its size, weight, anchor and fill.
+    fn text(&self, e: Node, style: &HashMap<&str, &str>) {
+        let words: String = e.descendants().filter(|n| n.is_text()).filter_map(|n| n.text()).collect::<String>();
+        let words = words.split_whitespace().collect::<Vec<_>>().join(" ");
+        let Some(fill) = self.paint(Some(style.get("fill").copied().unwrap_or("black")), e.attribute("opacity").map_or(1.0, number)) else { return };
+        if words.is_empty() {
+            return;
+        }
+        let c = self.c;
+        crate::util::select_mono(c, matches!(style.get("font-weight").copied(), Some("bold" | "bolder" | "600" | "700" | "800" | "900")));
+        c.set_font_size(style.get("font-size").map_or(16.0, |v| number(v)));
+        let spacing = style.get("letter-spacing").map_or(0.0, |v| number(v));
+        let Ok(ext) = crate::util::text_extents(c, &words) else { return };
+        let width = ext.x_advance() + spacing * (words.chars().count() as f64 - 1.0).max(0.0);
+        let f = |k: &str| e.attribute(k).map_or(0.0, number);
+        let x = f("x")
+            - match style.get("text-anchor").copied() {
+                Some("middle") => width / 2.0,
+                Some("end") => width,
+                _ => 0.0,
+            };
+        let _ = c.set_source(&fill);
+        if spacing == 0.0 {
+            c.move_to(x, f("y"));
+            let _ = crate::util::show_text(c, &words);
+            return;
+        }
+        let mut at = x;
+        for ch in words.chars() {
+            let one = ch.to_string();
+            c.move_to(at, f("y"));
+            let _ = crate::util::show_text(c, &one);
+            at += crate::util::text_extents(c, &one).map_or(0.0, |t| t.x_advance()) + spacing;
         }
     }
 
@@ -351,7 +453,9 @@ impl<'a, 'c> Drawer<'a, 'c> {
             for ch in e.children().filter(|n| n.is_element()) {
                 self.draw(ch, &style, inside);
             }
-        } else if (kind == "path" || kind == "rect") && inside {
+        } else if kind == "text" && inside {
+            self.text(e, &style);
+        } else if matches!(kind, "path" | "rect" | "circle" | "ellipse" | "polygon" | "polyline") && inside {
             c.new_path();
             self.shape(e);
             c.set_antialias(if style.get("shape-rendering") == Some(&"crispEdges") { Antialias::None } else { Antialias::Default });

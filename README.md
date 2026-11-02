@@ -28,6 +28,7 @@ Pick one with `--theme NAME`. Click a picture for the full size.
 | [![night_city](screenshots/themes/night_city.png)](screenshots/themes/night_city.png) **night_city**: a cyberpunk city in the rain | [![neon_rain](screenshots/themes/neon_rain.png)](screenshots/themes/neon_rain.png) **neon_rain**: a room over a rainy neon city |
 | [![matrix](screenshots/themes/matrix.png)](screenshots/themes/matrix.png) **matrix**: the digital rain | [![winter](screenshots/themes/winter-day.png)](screenshots/themes/winter-day.png) **winter**: a snowfield that follows the clock |
 | [![aurora](screenshots/themes/aurora.png)](screenshots/themes/aurora.png) **aurora**: northern lights over open water | [![copperworks](screenshots/themes/copperworks.png)](screenshots/themes/copperworks.png) **copperworks**: an alchemical engine that runs on the machine's readings |
+| [![racing](screenshots/themes/racing.png)](screenshots/themes/racing.png) **racing**: an arcade road trip that follows the clock | |
 
 Made a theme of your own? Share it: `retro-wall --new theme NAME` starts one, `EXTENDING.md` shows what
 it can do, and a pull request with the theme and a screenshot puts it here for everyone.
@@ -60,6 +61,14 @@ Every theme moves:
   the gauges read the processor, the disks and the battery, the tanks fill with the memory and the
   disk's space used, the vents steam with the network's traffic, and the lamps flicker as the disks
   work. Each part names its reading in the theme, so any of them can show another, or one of yours.
+- **racing**: an old DOS racer on a CRT: a low frame of pixel art, shown through scanlines and phosphors.
+  The road comes on, bending and climbing and dropping over hills ahead, the sun, hills and clouds
+  turning with it, and trees and light poles go by. The car keeps to its lane on the right, turns in the
+  bends and pitches over the hills. The sky follows the local clock: sunrise, day, sunset, and a starry night with the
+  lamps lit. By default it shows only the scene; set `[monitors]` in `retro.toml` to show the hostname
+  (shown here).
+
+  [![racing, live](screenshots/themes/racing.gif)](screenshots/themes/racing.png)
 
 It stays below every window and desktop icon, and clicks go to the desktop:
 
@@ -150,7 +159,7 @@ Options for the autostarted instance go in `~/.config/retro/retro-wall.conf`, on
 sources go in `~/.config/retro/retro.toml`.
 
 Themes: `phosphor` (the default), `neon_rain`, `night_city`, `aurora`, `winter`, `matrix`, `guybrush`,
-`copperworks`.
+`copperworks`, `racing`.
 
 ## Extending
 

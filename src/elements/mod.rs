@@ -11,6 +11,7 @@ pub mod mountains;
 pub mod night_city;
 pub mod painted;
 pub mod phosphor;
+pub mod racing;
 pub mod shader;
 pub mod winter;
 
@@ -86,6 +87,7 @@ fn registry() -> &'static [(Kind, Table)] {
         v.extend(guybrush::kinds());
         v.extend(winter::kinds());
         v.extend(matrix::kinds());
+        v.extend(racing::kinds());
         v.into_iter()
             .map(|k| {
                 let defaults = k.defaults.parse::<Table>().unwrap_or_else(|e| unreachable!("kind {}'s defaults: {e}", k.name));

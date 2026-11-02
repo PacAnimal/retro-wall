@@ -1,0 +1,49 @@
+# racing: a red sports car on an endless country road, seen from right behind, as an old DOS racer
+# looked on a tube: drawn into a low frame and shown through a CRT, its rows beams and its pixels
+# phosphors; the car, the trees and the poles pixel art. The road comes on and on, bending left and
+# right and climbing and dropping over hills ahead, and the sun, the hills and the clouds turn and rise
+# with it; the car keeps to its lane on the right, turns in the bends, shows more of its roof climbing
+# and less going over the top, and jiggles on the road's surface. Trees and light poles go by, a few of
+# their lamps broken, flickering or dim. The car is 35 views (car-*.png): five heights of seven angles.
+# `pixels` is the low frame's rows (0: no frame, drawn smoothly at the screen's own size).
+#
+# The sky follows the local clock: the sun crosses it and sets behind the hills in a glow, the moon and
+# the stars come out, and at night the poles, the headlights and the tail lights are lit. The `day`
+# tweak is the hours the sun is up. --demo HH:mm holds the time of day, to see the sunset at noon.
+#
+# The pictures are SVGs beside this file, each named in [element.road]: put your own in their place.
+name = "Racing"
+
+scene = ["road", "title", "instruments", "finish"]
+
+[monitors]                  # a pure wallpaper: nothing over the scene. title = "rightmost" in retro.toml
+title = "none"              # shows the hostname, in the lettering below. The road runs on every monitor
+widgets = "none"
+graph = "none"
+status = "none"
+
+[palette]                   # the lettering in the car's colours: its red, lit by the low sun
+base = "#0b1028"
+shadow = "#060a1a"
+deep = "#2a0a18"            # the extrusion, far: the car's shadowed red
+ramp = ["#1c2448", "#3e4470", "#8b1832", "#cc1230", "#ff6a53", "#ffe9a7"]
+title_top = "#ffe9a7"       # the sun's top
+title_light = "#ff8e65"     # its foot
+title_bottom = "#cc1230"    # the car's red
+glow = "#ffb183"
+caption = "#fff0cd"
+bracket = "#3e4470"
+ridge = "#ffd0a0"
+
+[tweaks]
+day = [7.0, 18.5]           # the hours the sun is up: the sky and the light follow them
+title_corner = "top-right"
+title_glow = [[8, 0.3]]
+title_shadow = [3.0, 4.0, 3.0, 1.2, "#120616"]
+corner = 0.03
+rule = false
+ruler_end = 0.0
+vignette = 0.25
+
+[element.road]
+type = "racing"

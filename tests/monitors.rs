@@ -36,8 +36,8 @@ fn expected(theme: &str) -> (Header, Header) {
         "neon_rain" => (Header::ALL, Header::NONE),
         // the hostname and the status line on the left; widgets and graph (it has none) on the right
         "copperworks" => (of(&[Piece::Title, Piece::Status]), of(&[Piece::Widgets, Piece::Graph])),
-        // a pure wallpaper: no header anywhere
-        "matrix" => (Header::NONE, Header::NONE),
+        // pure wallpapers: no header anywhere
+        "matrix" | "racing" => (Header::NONE, Header::NONE),
         _ => (Header::NONE, Header::ALL),
     }
 }
@@ -82,7 +82,7 @@ fn each_bundled_theme_places_its_header() {
         assert_eq!(live::header(m, "LOW", &stacked, false), Header::NONE, "{name}: the lower of two stacked");
         // one monitor driven alone shows every piece the theme does not turn off
         let alone = live::header(m, "DUMMY1", &all, true);
-        assert_eq!(alone, if name == "matrix" { Header::NONE } else { Header::ALL }, "{name}: alone");
+        assert_eq!(alone, union(got.0, got.1), "{name}: alone");
     }
 }
 
