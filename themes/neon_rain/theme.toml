@@ -11,6 +11,12 @@ extends = "night_city"
 
 scene = ["room", "neon", "rain", "drops", "frame", "lamp", "tv", "mountains", "title", "instruments", "finish"]
 
+[monitors]                  # on several monitors, the whole header on the leftmost: the others are the painting alone
+title = "leftmost"
+widgets = "leftmost"
+graph = "leftmost"
+status = "leftmost"
+
 [[group]]                   # the readings down the left from its top, as neon bars of cells
 anchor = "top-left"
 direction = "column"

@@ -183,10 +183,22 @@ fn header_placement() {
     // every monitor: the rule places it
     assert_eq!(live::header(&rules, "HDMI-1", &all, false), every);
     assert_eq!(live::header(&rules, "DP-1", &all, false), Header::NONE);
-    let primary = Monitors { title: Choice::Rule(Rule::Primary), widgets: Choice::Named(vec!["HDMI-1".into()]), graph: Choice::Rule(Rule::None) };
+    let primary = Monitors { title: Choice::Rule(Rule::Primary), widgets: Choice::Named(vec!["HDMI-1".into()]), graph: Choice::Rule(Rule::None), status: None };
     let h = live::header(&primary, "DP-1", &all, false);
     assert!(h.contains(Piece::Title) && !h.contains(Piece::Widgets) && !h.contains(Piece::Graph));
     assert!(!live::header(&primary, "DP-1", &all, true).contains(Piece::Graph));
+    // the status line without a rule of its own goes with the widgets
+    assert!(!h.contains(Piece::Status));
+    assert!(live::header(&primary, "HDMI-1", &all, false).contains(Piece::Status));
+    // with one, it goes alone: here away from the widgets, and on its own when they are off
+    let apart = Monitors { status: Some(Choice::Rule(Rule::Leftmost)), ..primary.clone() };
+    assert_eq!(live::header(&apart, "DP-1", &all, false), Header::of(Piece::Title).with(Piece::Status));
+    assert_eq!(live::header(&apart, "HDMI-1", &all, false), Header::of(Piece::Widgets));
+    let alone = Monitors { widgets: Choice::Rule(Rule::None), status: Some(Choice::Rule(Rule::All)), ..primary };
+    assert!(live::header(&alone, "HDMI-1", &all, false).contains(Piece::Status));
+    assert!(!live::header(&alone, "HDMI-1", &all, true).contains(Piece::Widgets));
+    assert_eq!(Header::ALL.to_string(), "title, widgets, graph, status");
+    assert_eq!(Header::NONE.to_string(), "no header");
     assert_eq!(live::pick(&all, None).unwrap().name, "DP-1");
     assert_eq!(live::pick(&all, Some("HDMI-1")).unwrap().name, "HDMI-1");
     assert!(live::pick(&all, Some("VGA-1")).is_none());

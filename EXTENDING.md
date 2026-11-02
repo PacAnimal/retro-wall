@@ -134,6 +134,19 @@ That is a whole theme. From there:
 - **The scene** (`scene = [...]`, bottom to top) and **its elements** (`[element.NAME]`, with `type =
   "KIND"` and its settings). `retro-wall --settings NAME` lists every setting of every element.
 - **The instruments**: `[[group]]` and `[widget.NAME]`, as in `retro.toml` (which wins over a theme's).
+- **Several monitors** (`[monitors]`): with `--all-monitors`, each piece of the header goes where its
+  key says: `title` (the hostname), `widgets` (the instruments), `graph` (the network's traffic) and
+  `status` (the network's status line; without a key, where the widgets are). Each takes
+  `"rightmost"` (the default), `"leftmost"`, `"primary"`, `"all"`, `"none"`, or a list of monitors'
+  names. The scenery, readings-driven parts included, is on every monitor. A `retro.toml`'s
+  `[monitors]` wins over the theme's, key by key. One monitor driven alone shows every piece that is
+  not `"none"`.
+
+  ```toml
+  [monitors]                  # the hostname on every monitor, the status line on the left, the rest on the right
+  title = "all"
+  status = "leftmost"
+  ```
 - **Day and night**: `[day.palette]`, `[night.tweaks]` and so on: the theme follows the time of day.
 
 A theme of **your own picture** is a painting: put the picture beside `theme.toml` and name it:

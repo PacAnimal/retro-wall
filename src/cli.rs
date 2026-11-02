@@ -30,9 +30,9 @@ pub const USAGE: &str = "usage: retro-wall [--theme NAME] [--config FILE] [--hos
            the desktop, and its wallpaper settings
        retro-wall --version
 
-  --all-monitors      every monitor, followed as they come and go; the header (hostname,
-                      instruments, traffic) where the theme's [monitors] says. One monitor
-                      alone shows all of it
+  --all-monitors      every monitor, followed as they come and go; each piece of the header
+                      (hostname, instruments, traffic, status line) where the theme's [monitors]
+                      says. One monitor alone shows all of it
   --battery           a BAT meter, the battery's charge
   --pause-screen-off  pause while the screen is off, or a laptop's lid is closed on its panel
   --pause-below PCT   on battery, pause only at PCT or less (by default, at any charge)

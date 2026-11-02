@@ -166,6 +166,10 @@ temperature, news headlines), an instrument, and a theme with a shader. See `EXT
 cargo test --release          # under Xvfb where it is installed: the GL tests are skipped without it
 ```
 
+The multi-monitor tests run the wall on several virtual monitors, plugged in and out as it runs: Xorg's
+dummy driver, `xrandr` and `xwd` (Debian: `xserver-xorg-video-dummy x11-xserver-utils x11-apps`).
+Without them they are skipped.
+
 `RETRO_BLESS=1 cargo test --release --test gl` writes the reference pictures again;
 `RETRO_TEST_FULL=1` runs every limit case, not a sample. The install test runs a desktop in a
 container: `docker run --rm -v "$PWD:/src:ro" debian:trixie /src/tests/linux/container xfce` (after

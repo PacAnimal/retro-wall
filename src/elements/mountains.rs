@@ -533,8 +533,8 @@ fn fill_quad(x0: f64, y0: f64, x1: f64, y1: f64, (r, g, b): (f64, f64, f64), a: 
 }
 
 impl Part for Mountains {
-    fn shows(&self) -> Option<Piece> {
-        Some(Piece::Graph)
+    fn shows(&self) -> Header {
+        Header::of(Piece::Graph)
     }
     fn live(&self) -> bool {
         true
@@ -565,7 +565,7 @@ impl Part for Mountains {
         let u = unit(width, height);
         let mut lift = 0.0;
         self.pad = if self.card { (0.012 * u).round() } else { 0.0 };
-        let status_shown = g.header.contains(Piece::Widgets) && th.layout.iter().any(|gr| gr.widgets.iter().any(|n| n == "status"));
+        let status_shown = g.header.contains(Piece::Status) && th.layout.iter().any(|gr| gr.widgets.iter().any(|n| n == "status"));
         let line = bracket_corners(width, height, g.edges).bottom;
         if self.place == Place::Corner && status_shown {
             lift = status_bottom(th, width, height, w.zoom, line) - line;

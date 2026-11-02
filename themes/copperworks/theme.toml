@@ -11,6 +11,10 @@ name = "Copperworks"
 
 scene = ["plate", "tanks-teal", "tanks-violet", "gears", "gauges", "pipe", "lamps", "vents", "title", "instruments", "finish"]
 
+[monitors]                  # on several monitors, the hostname and the status line on the leftmost; the machine's
+title = "leftmost"          # gears, gauges, tanks, lamps and vents are the painting, and run on every monitor
+status = "leftmost"
+
 [[group]]                   # the network's status line, on glass, in the bottom right corner (status_corner)
 anchor = "status"
 widgets = ["status"]

@@ -18,12 +18,24 @@ pub use crate::platform::Edges;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Piece {
     Title,
+    /// The instruments, all but the network's status line.
     Widgets,
     Graph,
+    /// The network's status line.
+    Status,
 }
 
 impl Piece {
-    pub const ALL: [Piece; 3] = [Piece::Title, Piece::Widgets, Piece::Graph];
+    pub const ALL: [Piece; 4] = [Piece::Title, Piece::Widgets, Piece::Graph, Piece::Status];
+    /// Its key in [monitors].
+    pub fn key(self) -> &'static str {
+        match self {
+            Piece::Title => "title",
+            Piece::Widgets => "widgets",
+            Piece::Graph => "graph",
+            Piece::Status => "status",
+        }
+    }
     fn bit(self) -> u8 {
         1 << self as u8
     }
@@ -35,12 +47,27 @@ pub struct Header(u8);
 
 impl Header {
     pub const NONE: Header = Header(0);
-    pub const ALL: Header = Header(0b111);
+    pub const ALL: Header = Header(0b1111);
+    pub const fn of(p: Piece) -> Header {
+        Header(1 << p as u8)
+    }
     pub fn contains(self, p: Piece) -> bool {
         self.0 & p.bit() != 0
     }
+    /// Whether it shares a piece with `other`.
+    pub fn meets(self, other: Header) -> bool {
+        self.0 & other.0 != 0
+    }
     pub fn with(self, p: Piece) -> Header {
         Header(self.0 | p.bit())
+    }
+}
+
+/// The pieces by their keys in [monitors], "no header" for none: "title, status".
+impl std::fmt::Display for Header {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let keys: Vec<&str> = Piece::ALL.into_iter().filter(|&p| self.contains(p)).map(Piece::key).collect();
+        f.write_str(if keys.is_empty() { "no header".into() } else { keys.join(", ") }.as_str())
     }
 }
 
@@ -187,10 +214,10 @@ pub enum Pass {
 }
 
 pub trait Part {
-    /// The header piece it is, drawn only on monitors that show it. None: scenery, drawn on every
-    /// monitor.
-    fn shows(&self) -> Option<Piece> {
-        None
+    /// The header pieces it draws, made only on monitors that show one of them. NONE: scenery, drawn
+    /// on every monitor.
+    fn shows(&self) -> Header {
+        Header::NONE
     }
     /// Its passes, bottom to top. By default a still pass if `still`, then a live one if `live`.
     fn passes(&self) -> &'static [Pass] {
