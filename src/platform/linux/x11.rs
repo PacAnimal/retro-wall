@@ -151,9 +151,18 @@ impl X {
         }
     }
 
+    /// The root window's size now, asked of the server. Xlib's own figures (XDisplayWidth) are those of
+    /// when the display was opened: started with every output off, the root is the server's smallest
+    /// (320x200), and the struts, measured from the root's edges, would then reach most of the monitor.
     fn screen_size(&self) -> (i32, i32) {
-        // SAFETY: an open display and its default screen.
-        unsafe { ((self.xl.XDisplayWidth)(self.dpy, self.screen), (self.xl.XDisplayHeight)(self.dpy, self.screen)) }
+        // SAFETY: an open display and its root window; XWindowAttributes is plain data, filled in by the call.
+        unsafe {
+            let mut a: xlib::XWindowAttributes = std::mem::zeroed();
+            if (self.xl.XGetWindowAttributes)(self.dpy, self.root, &mut a) != 0 {
+                return (a.width, a.height);
+            }
+            ((self.xl.XDisplayWidth)(self.dpy, self.screen), (self.xl.XDisplayHeight)(self.dpy, self.screen))
+        }
     }
 
     fn clients(&self) -> Option<Vec<c_ulong>> {
