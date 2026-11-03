@@ -1,9 +1,9 @@
 # retro-wall
 
 A live desktop wallpaper: a scene that moves (a synthwave horizon, a rainy neon city, an arctic night,
-the digital rain, a winter field, a pirate island, an engine of copper and steam), with the machine's
-readings in it: meters, a tape deck that plays with the disks, the network's traffic as mountains, its
-status line.
+the digital rain, a winter field, a pirate island, an engine of copper and steam, a road at sunset),
+with the machine's readings in it: meters, a tape deck that plays with the disks, the network's traffic
+as mountains, its status line.
 
 One Rust binary. It draws on the GPU (OpenGL 3.3, or 2.1 on older hardware), presents a frame only when
 something in it changed, and stops while the picture is covered or the machine is on battery.
@@ -20,55 +20,55 @@ something in it changed, and stops while the picture is covered or the machine i
 
 ## Themes
 
-Pick one with `--theme NAME`. Click a picture for the full size.
+Pick one with `--theme NAME`. Click a picture for a full-resolution still.
 
-| | |
-|---|---|
-| [![phosphor](screenshots/landscape.png)](screenshots/landscape.png) **phosphor** (default): a synthwave horizon in CRT amber | [![guybrush](screenshots/themes/guybrush.png)](screenshots/themes/guybrush.png) **guybrush**: a painted pirate island |
-| [![night_city](screenshots/themes/night_city.png)](screenshots/themes/night_city.png) **night_city**: a cyberpunk city in the rain | [![neon_rain](screenshots/themes/neon_rain.png)](screenshots/themes/neon_rain.png) **neon_rain**: a room over a rainy neon city |
-| [![matrix](screenshots/themes/matrix.png)](screenshots/themes/matrix.png) **matrix**: the digital rain | [![winter](screenshots/themes/winter-day.png)](screenshots/themes/winter-day.png) **winter**: a snowfield that follows the clock |
-| [![aurora](screenshots/themes/aurora.png)](screenshots/themes/aurora.png) **aurora**: northern lights over open water | [![copperworks](screenshots/themes/copperworks.png)](screenshots/themes/copperworks.png) **copperworks**: an alchemical engine that runs on the machine's readings |
-| [![racing](screenshots/themes/racing.png)](screenshots/themes/racing.png) **racing**: an arcade road trip that follows the clock | |
+<table>
+<tr><td>
+<a href="screenshots/landscape.png"><img src="screenshots/live.gif" width="800" alt="phosphor"></a><br>
+<b>phosphor</b> (default): a synthwave horizon in CRT amber
+</td></tr>
+<tr><td>
+<a href="screenshots/themes/neon_rain.png"><img src="screenshots/themes/neon_rain.gif" width="800" alt="neon_rain"></a><br>
+<b>neon_rain</b>: a room over a rainy neon city
+</td></tr>
+<tr><td>
+<a href="screenshots/themes/night_city.png"><img src="screenshots/themes/night_city.gif" width="800" alt="night_city"></a><br>
+<b>night_city</b>: a cyberpunk city in the rain
+</td></tr>
+<tr><td>
+<a href="screenshots/themes/matrix.png"><img src="screenshots/themes/matrix.gif" width="800" alt="matrix"></a><br>
+<b>matrix</b>: the digital rain
+</td></tr>
+<tr><td>
+<a href="screenshots/themes/aurora.png"><img src="screenshots/themes/aurora.gif" width="800" alt="aurora"></a><br>
+<b>aurora</b>: northern lights over open water
+</td></tr>
+<tr><td>
+<a href="screenshots/themes/guybrush.png"><img src="screenshots/themes/guybrush.gif" width="800" alt="guybrush"></a><br>
+<b>guybrush</b>: a painted pirate island
+</td></tr>
+<tr><td>
+<a href="screenshots/themes/copperworks.png"><img src="screenshots/themes/copperworks.gif" width="800" alt="copperworks"></a><br>
+<b>copperworks</b>: an alchemical engine that runs on the machine's readings
+</td></tr>
+<tr><td>
+<a href="screenshots/themes/winter.png"><img src="screenshots/themes/winter.gif" width="800" alt="winter"></a><br>
+<b>winter</b>: a snowfield that follows the clock
+<br><img src="screenshots/themes/winter-times.png" width="800" alt="winter at 13:00 and at 23:00">
+</td></tr>
+<tr><td>
+<a href="screenshots/themes/racing.png"><img src="screenshots/themes/racing.gif" width="800" alt="racing"></a><br>
+<b>racing</b>: an old DOS racer that follows the clock
+<br><img src="screenshots/themes/racing-times.png" width="800" alt="racing at 07:00, 13:00, 18:30 and 23:00">
+</td></tr>
+</table>
+
+matrix and racing show only the scene by default. Set `[monitors]` in `retro.toml` to show the
+hostname, instruments and graph, as here.
 
 Made a theme of your own? Share it: `retro-wall --new theme NAME` starts one, `EXTENDING.md` shows what
-it can do, and a pull request with the theme and a screenshot puts it here for everyone.
-
-Every theme moves:
-
-- **phosphor**: the floor scrolls toward you and the sun shimmers (above).
-- **neon_rain**: rain falls on the city and runs down the window. The signs dim, the lamp flickers, and
-  the TV changes channel through interference.
-
-  [![neon rain, live](screenshots/themes/neon_rain.gif)](screenshots/themes/neon_rain.png)
-
-- **night_city**: windows light and go dark. The neon flickers.
-
-  [![night city, live](screenshots/themes/night_city.gif)](screenshots/themes/night_city.png)
-
-- **matrix**: the rain falls. By default it shows only the rain. Set `[monitors]` in `retro.toml` to
-  show the hostname, instruments and graph (shown here).
-
-  [![matrix, live](screenshots/themes/matrix.gif)](screenshots/themes/matrix.png)
-
-- **winter**: day turns to night with the local clock. The snow blows in gusts.
-
-  ![winter by day and by night](screenshots/themes/winter-day-night.png)
-
-  [![winter's snow, live](screenshots/themes/winter-snow.gif)](screenshots/themes/winter-night.png)
-
-- **aurora**: the curtains of light drift and fold, and the water mirrors them.
-- **copperworks**: the machine is the instruments. The gears turn faster with the processor's load,
-  the gauges read the processor, the disks and the battery, the tanks fill with the memory and the
-  disk's space used, the vents steam with the network's traffic, and the lamps flicker as the disks
-  work. Each part names its reading in the theme, so any of them can show another, or one of yours.
-- **racing**: an old DOS racer on a CRT: a low frame of pixel art, shown through scanlines and phosphors.
-  The road comes on, bending and climbing and dropping over hills ahead, the sun, hills and clouds
-  turning with it, and trees and light poles go by. The car keeps to its lane on the right, turns in the
-  bends and pitches over the hills. The sky follows the local clock: sunrise, day, sunset, and a starry night with the
-  lamps lit. By default it shows only the scene; set `[monitors]` in `retro.toml` to show the hostname
-  (shown here).
-
-  [![racing, live](screenshots/themes/racing.gif)](screenshots/themes/racing.png)
+it can do, and a pull request with the theme and a GIF of it (made from `--snapshot --frames`) puts it here
+for everyone.
 
 It stays below every window and desktop icon, and clicks go to the desktop:
 
@@ -149,6 +149,7 @@ retro-wall                                   # the live wallpaper (the installer
 retro-wall --theme neon_rain                 # another theme
 retro-wall --all-monitors                    # every monitor, followed as they come and go
 retro-wall --snapshot out.png                # one frame, fixed readings
+retro-wall --snapshot f.png --frames 90      # three seconds of it playing: f-0000.png to f-0089.png
 retro-wall --preview out.png 2560x1440       # the still picture
 retro-wall --list                            # themes, element kinds, sources, widget types
 retro-wall --help                            # every option

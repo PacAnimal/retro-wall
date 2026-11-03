@@ -264,6 +264,48 @@ fn a_snapshot_shows_the_faces_first_answers() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
+/// Played frames are drawn on a clock of their own: each a different picture, and the same pictures
+/// on every run, however busy the machine is while they are drawn. Past the warm-up's first spools of
+/// the tape, whose turns are random.
+#[test]
+fn played_frames_are_the_same_on_every_run() {
+    let Some(x) = Xvfb::start("played_frames_are_the_same_on_every_run", 320, 180) else { return };
+    let home = scratch("frames");
+    let mut runs = vec![];
+    for run in ["a", "b"] {
+        let dir = home.join(run);
+        std::fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("f.png");
+        let mut c = x.retro_wall(&home);
+        c.args([
+            "--snapshot",
+            out.to_str().unwrap(),
+            "--frames",
+            "4",
+            "--fps",
+            "15",
+            "--at",
+            "30",
+            "--demo",
+            "13:37",
+            "--theme",
+            "phosphor",
+            "--host",
+            "testhost",
+        ]);
+        let done = c.output().unwrap();
+        let said = String::from_utf8_lossy(&done.stderr).into_owned() + &String::from_utf8_lossy(&done.stdout);
+        assert!(done.status.success(), "{said}");
+        assert!(!dir.join("f.png").exists() && !dir.join("f-0004.png").exists(), "{said}");
+        runs.push((0..4).map(|i| common::x::pixels(&dir.join(format!("f-{i:04}.png"))).2).collect::<Vec<_>>());
+    }
+    for i in 1..4 {
+        assert_ne!(runs[0][i - 1], runs[0][i], "frames {} and {i} are the same picture", i - 1);
+    }
+    assert!(runs[0] == runs[1], "two runs drew different frames");
+    let _ = std::fs::remove_dir_all(&home);
+}
+
 /// A theme's shader may name its own variables as it likes, `t` and `c` too, on either profile.
 #[test]
 fn a_shader_names_its_variables_freely() {

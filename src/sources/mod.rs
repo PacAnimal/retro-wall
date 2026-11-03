@@ -18,7 +18,7 @@ pub use traffic::{Traffic, count_interfaces, demo_rate, net_counts};
 
 use crate::rng::Rng;
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -103,56 +103,84 @@ pub(crate) fn jitter(n: i64, seed: i64) -> f64 {
 }
 
 static T0: OnceLock<Instant> = OnceLock::new();
+/// The made-up readings' clock when held (`hold_demo_time`), as f64 bits; NaN while it runs.
+static HELD: AtomicU64 = AtomicU64::new(0x7ff8_0000_0000_0000);
 
 /// Seconds on the made-up readings' clock.
 pub(crate) fn demo_time() -> f64 {
-    T0.get_or_init(Instant::now).elapsed().as_secs_f64() + 1000.0
+    let held = f64::from_bits(HELD.load(Ordering::Relaxed));
+    if held.is_nan() { T0.get_or_init(Instant::now).elapsed().as_secs_f64() + 1000.0 } else { held }
 }
 
-/// The sampler: every quarter second, reads each built-in source a widget asked for, at its pace.
-/// Made-up readings with `demo`.
-pub fn spawn_sampler(readings: Arc<Mutex<HashMap<String, Reading>>>, running: Arc<AtomicBool>, demo: bool) {
-    let spawned = std::thread::Builder::new().name("sources".into()).spawn(move || {
-        let mut sources: HashMap<String, (Box<dyn Source>, Duration, Instant)> = HashMap::new();
-        let mut others: HashSet<String> = HashSet::new();
+/// Hold the made-up readings' clock at t, for frames drawn on a clock of their own.
+pub fn hold_demo_time(t: f64) {
+    HELD.store(t.to_bits(), Ordering::Relaxed);
+}
+
+/// Seconds on the clock a source measures its rates by: the made-up readings' own with `demo`.
+pub(crate) fn rate_time(demo: bool) -> f64 {
+    if demo { demo_time() } else { T0.get_or_init(Instant::now).elapsed().as_secs_f64() + 1000.0 }
+}
+
+/// Reads each built-in source a widget asked for, at its pace; made-up readings with `demo`.
+pub struct Sampler {
+    sources: HashMap<String, (Box<dyn Source>, f64, f64)>,
+    others: HashSet<String>,
+    demo: bool,
+}
+
+impl Sampler {
+    pub fn new(demo: bool) -> Sampler {
+        Sampler { sources: HashMap::new(), others: HashSet::new(), demo }
+    }
+
+    /// Read the sources due at `now` (seconds), first making those newly asked for.
+    pub fn step(&mut self, readings: &Mutex<HashMap<String, Reading>>, now: f64) {
         let lock = || readings.lock().unwrap_or_else(|e| e.into_inner());
-        loop {
-            std::thread::sleep(Duration::from_millis(250));
-            if !running.load(Ordering::Relaxed) {
-                continue;
-            }
-            let asked = lock().len();
-            if asked != sources.len() + others.len() {
-                let wanted: Vec<String> = lock().keys().filter(|k| !sources.contains_key(*k) && !others.contains(*k)).cloned().collect();
-                for name in wanted {
-                    match builtin(&name) {
-                        Some((b, path)) => match (b.make)(path, demo) {
-                            Some(s) => {
-                                sources.insert(name, (s, crate::util::seconds(b.every), Instant::now()));
-                            }
-                            None => {
-                                crate::errln!("source {name}: cannot be read");
-                                lock().entry(name.clone()).or_default().stale = true;
-                                others.insert(name);
-                            }
-                        },
-                        None => {
-                            others.insert(name); // a plugin's, read on its own thread
+        let asked = lock().len();
+        if asked != self.sources.len() + self.others.len() {
+            let wanted: Vec<String> = lock().keys().filter(|k| !self.sources.contains_key(*k) && !self.others.contains(*k)).cloned().collect();
+            for name in wanted {
+                match builtin(&name) {
+                    Some((b, path)) => match (b.make)(path, self.demo) {
+                        Some(s) => {
+                            self.sources.insert(name, (s, b.every, now));
                         }
+                        None => {
+                            crate::errln!("source {name}: cannot be read");
+                            lock().entry(name.clone()).or_default().stale = true;
+                            self.others.insert(name);
+                        }
+                    },
+                    None => {
+                        self.others.insert(name); // a plugin's, read on its own thread
                     }
                 }
             }
-            let now = Instant::now();
-            for (name, (source, every, due)) in sources.iter_mut() {
-                if now < *due {
-                    continue;
-                }
-                *due = now + *every;
-                if let Some((value, indicator)) = source.read()
-                    && let Some(r) = lock().get_mut(name)
-                {
-                    *r = Reading { value: value.clamp(0.0, 100.0), indicator, text: None, stale: false };
-                }
+        }
+        for (name, (source, every, due)) in self.sources.iter_mut() {
+            if now < *due {
+                continue;
+            }
+            *due = now + *every;
+            if let Some((value, indicator)) = source.read()
+                && let Some(r) = lock().get_mut(name)
+            {
+                *r = Reading { value: value.clamp(0.0, 100.0), indicator, text: None, stale: false };
+            }
+        }
+    }
+}
+
+/// The sampler on a thread of its own: every quarter second while `running`.
+pub fn spawn_sampler(readings: Arc<Mutex<HashMap<String, Reading>>>, running: Arc<AtomicBool>, demo: bool) {
+    let spawned = std::thread::Builder::new().name("sources".into()).spawn(move || {
+        let mut sampler = Sampler::new(demo);
+        let t0 = Instant::now();
+        loop {
+            std::thread::sleep(Duration::from_millis(250));
+            if running.load(Ordering::Relaxed) {
+                sampler.step(&readings, t0.elapsed().as_secs_f64());
             }
         }
     });

@@ -76,6 +76,13 @@ fn command_lines() {
     let (c, a) = cli::parse(&args("--preview out.png 640x360 --battery -")).unwrap();
     assert_eq!((c, a.host.as_deref()), (Command::Preview("out.png".into(), 640, 360), Some("-")));
     assert_eq!(cli::parse(&args("--snapshot x.png --at 3")).unwrap().0, Command::Snapshot("x.png".into()));
+    let (c, a) = cli::parse(&args("--snapshot x.png --frames 5 --fps 25")).unwrap();
+    assert_eq!((c, a.frames, a.fps), (Command::Snapshot("x.png".into()), Some(5), 25.0));
+    assert_eq!(cli::parse(&args("--snapshot x.png --frames 5")).unwrap().1.fps, 30.0);
+    assert_eq!(cli::parse(&args("--snapshot x.png")).unwrap().1.frames, None);
+    assert_eq!(live::frame_file("out.png", 7), "out-0007.png");
+    assert_eq!(live::frame_file("/tmp/a/f.png", 12), "/tmp/a/f-0012.png");
+    assert_eq!(live::frame_file("frames", 0), "frames-0000");
     assert!(cli::parse(&args("--all-monitors")).unwrap().1.all_monitors);
     for bad in [
         "--preview x.png 0x0",
@@ -93,6 +100,13 @@ fn command_lines() {
         "--all-monitors DP-1",
         "DP-1 DP-2",
         "--snapshot x.png DP-1",
+        "--snapshot x.png --frames 0",
+        "--snapshot x.png --frames 2.5",
+        "--snapshot x.png --frames 3 --fps 5",
+        "--snapshot x.png --frames 3 --fps 500",
+        "--snapshot x.png --fps 30",
+        "--frames 3",
+        "--fps 30",
         "--frobnicate",
         "--theme",
     ] {
@@ -155,6 +169,7 @@ fn bad_input_exits_2_without_a_panic() {
         &["--preview", "/tmp/x.png", "0x0"],
         &["--preview", "/tmp/x.png", "100000x100000"],
         &["--snapshot", u],
+        &["--snapshot", u, "--frames", "3"],
         &["--pause-vnc", "x"],
         &["--at", "inf", "--snapshot", "/tmp/x.png"],
         &["--new", "source", "../escape"],
