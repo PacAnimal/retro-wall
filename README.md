@@ -185,6 +185,8 @@ temperature, news headlines), an instrument, and a theme with a shader. See `EXT
 cargo test --release          # under Xvfb where it is installed: the GL tests are skipped without it
 ```
 
+In a container with everything the tests need: `ci/README.md`, "Tests".
+
 The multi-monitor tests run the wall on several virtual monitors, plugged in and out as it runs: Xorg's
 dummy driver, `xrandr` and `xwd` (Debian: `xserver-xorg-video-dummy x11-xserver-utils x11-apps`).
 Without them they are skipped.
