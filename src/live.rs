@@ -2,6 +2,8 @@
 //! scene's plan and presented only when it changes, all from one loop. Pauses on battery, with the
 //! screen off or a VNC viewer connected (instruments fade, the scene slows to a stop, the loop
 //! sleeps), skips drawing a monitor while it is covered, and follows monitors as they come and go.
+//! Where the desktop draws over its wallpaper (its icons), that is laid over the live picture again, so
+//! the wall shows under the icons as the still picture does (`Icons`).
 
 use crate::cli::Reserve;
 use crate::config::{Choice, Loaded, Monitors, Rule, Theme};
@@ -9,6 +11,7 @@ use crate::gfx::{Gfx, Tex, Uploads};
 use crate::platform::{Desktop, Display, Edges, Native, Platform, Screen, WindowId};
 use crate::scene::*;
 use crate::sources::{self, Traffic};
+use cairo::ImageSurface;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -69,6 +72,12 @@ struct Monitor {
     hidden: bool,
     /// Its window covers the whole monitor: the desktop shows no wallpaper (Display::wallpaper_hidden).
     whole: bool,
+    /// Its still picture as the desktop shows it, kept until the desktop's icons are followed.
+    picture: Option<ImageSurface>,
+    /// What the desktop draws over its wallpaper here (its icons), laid over the live picture.
+    icons: Option<Icons>,
+    /// The window's rectangle on the monitor: x, y, width, height.
+    pane: (i32, i32, i32, i32),
 }
 
 const FADE: f64 = 1.0;
@@ -165,6 +174,9 @@ impl Monitor {
             faded_at: None,
             hidden: false,
             whole,
+            picture: None,
+            icons: None,
+            pane: rect,
         })
     }
 
@@ -209,6 +221,9 @@ impl Monitor {
 
     fn render(&mut self, w: &World) {
         draw_plan(&self.plan, &mut self.parts, &self.geo, &mut self.gfx, w, self.presence);
+        if let Some(i) = self.icons.as_mut() {
+            i.draw(&mut self.gfx, self.pane);
+        }
         self.gfx.flush();
     }
 
@@ -222,6 +237,74 @@ impl Monitor {
         }
         self.next = self.live.iter().map(|&i| self.parts[i].interval()).fold(1.0 / 30.0, f64::min);
         self.next
+    }
+
+    /// What the desktop has drawn anew in these rectangles (all of the monitor at first), taken into its
+    /// icons. Whether a GL context was made current.
+    fn desktop_drawn(&mut self, d: &mut impl Display, rects: &[crate::platform::Rect]) -> bool {
+        let s = &self.screen;
+        let whole = [crate::platform::Rect::new(s.x as i64, s.y as i64, (s.x + s.w) as i64, (s.y + s.h) as i64)];
+        let first = self.icons.is_none();
+        // the still picture, as the desktop shows it: drawn again if it was not kept
+        let mut picture = match self.icons.as_mut() {
+            Some(i) => std::mem::replace(&mut i.picture, crate::util::surface_rgb(1, 1)),
+            None => self.picture.take().unwrap_or_else(|| crate::still::draw(&self.geo).unwrap_or_else(|_| crate::util::surface_rgb(1, 1))),
+        };
+        // what the desktop draws, starting as the still picture: what cannot be read shows nothing over the wall
+        let mut drawn = self.icons.as_mut().map_or_else(|| copied(&picture), |i| std::mem::replace(&mut i.drawn, crate::util::surface_rgb(1, 1)));
+        let mut changed = false;
+        let (stride, ps) = (drawn.stride() as usize, picture.stride() as usize);
+        let whole_size = |p: &cairo::ImageSurface| p.width() == s.w && p.height() == s.h;
+        let sized = whole_size(&drawn) && whole_size(&picture);
+        if sized && let (Some(mut px), Some(pp)) = (crate::util::view(&mut drawn), crate::util::view(&mut picture)) {
+            for r in if first { &whole[..] } else { rects } {
+                let (x0, y0) = (r.left.max(s.x as i64) as i32, r.top.max(s.y as i64) as i32);
+                let (x1, y1) = (r.right.min((s.x + s.w) as i64) as i32, r.bottom.min((s.y + s.h) as i64) as i32);
+                if x1 <= x0 || y1 <= y0 {
+                    continue;
+                }
+                let (w, h) = ((x1 - x0) as usize, (y1 - y0) as usize);
+                let at = |row: usize, col: usize, stride: usize| (y0 - s.y) as usize * stride + row * stride + ((x0 - s.x) as usize + col) * 4;
+                match d.desktop_pixels(x0, y0, x1 - x0, y1 - y0) {
+                    Some(got) => {
+                        for (i, p) in got.iter().enumerate() {
+                            let a = at(i / w, i % w, stride);
+                            px[a..a + 3].copy_from_slice(&[p[2], p[1], p[0]]);
+                        }
+                    }
+                    // not shown by the desktop (gone, or this part out of its window): the still picture again
+                    None => {
+                        for row in 0..h {
+                            let (a, b) = (at(row, 0, stride), at(row, 0, ps));
+                            px[a..a + w * 4].copy_from_slice(&pp[b..b + w * 4]);
+                        }
+                    }
+                }
+                changed = true;
+            }
+        }
+        if let Some(i) = self.icons.as_mut() {
+            i.drawn = drawn;
+            i.picture = picture;
+            if !changed {
+                return false;
+            }
+            for r in rects {
+                i.mark(r.left - s.x as i64, r.top - s.y as i64, r.right - s.x as i64, r.bottom - s.y as i64);
+            }
+            d.make_current(self.window);
+            self.gfx.replace(i.tex, &i.drawn, crate::gfx::Kind::Layer);
+        } else {
+            d.make_current(self.window);
+            let still = self.gfx.upload(&picture, crate::gfx::Kind::Layer);
+            let tex = self.gfx.upload(&drawn, crate::gfx::Kind::Layer);
+            let (cols, rows) = ((s.w as usize).div_ceil(BLOCK), (s.h as usize).div_ceil(BLOCK));
+            let mut i = Icons { drawn, picture, tex, still, blocks: vec![false; cols * rows], cols, program: None };
+            i.mark(0, 0, s.w as i64, s.h as i64);
+            self.icons = Some(i);
+        }
+        self.state = None;
+        true
     }
 
     /// Whether it draws nothing now: covered, or paused and faded out.
@@ -519,6 +602,25 @@ pub fn run(loaded: &Loaded, o: Options) {
         let t = now(t0);
         let due = timers.tick(t);
         let exposed = d.events();
+        // what the desktop draws over its wallpaper (its icons), laid over the live windows
+        // followed only where the desktop shows each monitor's own still picture: a desktop of a
+        // picture per monitor, or one monitor; elsewhere its picture would be laid over the wall
+        let follows = desktop.as_ref().is_some_and(|k| k.per_monitor()) || monitors.len() <= 1;
+        // taken every time, so nothing piles up; laid over the wall only where it is followed
+        let drawn = d.desktop_drawn().filter(|_| follows);
+        if !follows {
+            for m in monitors.iter_mut().filter(|m| m.icons.is_some() || m.picture.is_some()) {
+                (m.icons, m.picture, m.state) = (None, None, None);
+                current = None;
+            }
+        }
+        if let Some(drawn) = &drawn {
+            for m in monitors.iter_mut() {
+                if (m.icons.is_none() || !drawn.is_empty()) && m.desktop_drawn(&mut d, drawn) {
+                    current = None;
+                }
+            }
+        }
         {
             let n = net.lock().unwrap_or_else(|e| e.into_inner());
             if *n != w.network {
@@ -560,7 +662,7 @@ pub fn run(loaded: &Loaded, o: Options) {
                         continue;
                     }
                     let is_lead = lead.as_deref() == Some(s.name.as_str());
-                    match open_monitor(&mut d, &s, &th, h, e, &o, &mut w, desktop.as_deref(), is_lead) {
+                    match open_monitor(&mut d, &s, &th, h, e, &o, &mut w, desktop.as_deref(), is_lead, drawn.is_some()) {
                         Ok(mut m) => {
                             m.shown = paused.is_none();
                             current = Some(m.window);
@@ -652,6 +754,113 @@ pub fn run(loaded: &Loaded, o: Options) {
     }
 }
 
+/// What the desktop draws over its wallpaper on a monitor (its icons, their names, a selection), laid
+/// over the live picture where it differs from the still picture: as the desktop draws it, and that
+/// picture, each a texture of the window's pane, and the program that lays one over the other.
+struct Icons {
+    drawn: ImageSurface,
+    /// The still picture: kept to tell where the desktop draws over it.
+    picture: ImageSurface,
+    tex: Tex,
+    still: Tex,
+    /// Which squares of BLOCK pixels the desktop draws over, by row: only those are drawn again.
+    blocks: Vec<bool>,
+    cols: usize,
+    program: Option<Option<(gl::types::GLuint, [gl::types::GLint; 4])>>,
+}
+
+/// The side of a square the icons are followed by.
+const BLOCK: usize = 64;
+
+/// Where the desktop's pixel (tex0) is not the still picture's (tex1), it shows: over `square`, of the
+/// window's `pane` (x, y, width, height on the monitor, both).
+const ICONS: &str = "uniform vec4 square; uniform vec4 pane;
+void main() {
+    vec2 at = (square.xy + uv * square.zw - pane.xy) / pane.zw;
+    vec3 d = texture2D(tex0, at).rgb;
+    float a = smoothstep(0.03, 0.1, length(d - texture2D(tex1, at).rgb));
+    gl_FragColor = vec4(d * a, a);
+}";
+
+impl Icons {
+    /// Find again which squares the desktop draws over, in a rectangle of the monitor.
+    fn mark(&mut self, x0: i64, y0: i64, x1: i64, y1: i64) {
+        let (w, h) = (self.picture.width() as usize, self.picture.height() as usize);
+        let rows = self.blocks.len() / self.cols.max(1);
+        let (bx0, by0) = ((x0.max(0) as usize) / BLOCK, (y0.max(0) as usize) / BLOCK);
+        let (bx1, by1) = ((x1.max(0) as usize).div_ceil(BLOCK).min(self.cols), (y1.max(0) as usize).div_ceil(BLOCK).min(rows));
+        let (ds, ps) = (self.drawn.stride() as usize, self.picture.stride() as usize);
+        let (Some(d), Some(p)) = (crate::util::view(&mut self.drawn), crate::util::view(&mut self.picture)) else { return };
+        for by in by0..by1 {
+            for bx in bx0..bx1 {
+                let differs = (by * BLOCK..((by + 1) * BLOCK).min(h)).any(|y| {
+                    (bx * BLOCK..((bx + 1) * BLOCK).min(w))
+                        .any(|x| (0..3).map(|c| d[y * ds + x * 4 + c].abs_diff(p[y * ps + x * 4 + c]) as u32).sum::<u32>() > 24)
+                });
+                self.blocks[by * self.cols + bx] = differs;
+            }
+        }
+    }
+
+    /// Over the live picture, in the squares the desktop draws over: runs of them along each row.
+    fn draw(&mut self, gfx: &mut Gfx, pane: (i32, i32, i32, i32)) {
+        let program = self.program.get_or_insert_with(|| match gfx.compile(ICONS) {
+            Ok(p) => Some((p, ["tex0", "tex1", "square", "pane"].map(|n| gfx.uniform(p, n)))),
+            Err(e) => {
+                crate::errln!("the desktop's icons over the wall: {e}");
+                None
+            }
+        });
+        let Some((prog, loc)) = program else { return };
+        let (px, py, pw, ph) = pane;
+        let p = [px as f32, py as f32, pw as f32, ph as f32];
+        for (row, line) in self.blocks.chunks(self.cols).enumerate() {
+            let mut x = 0;
+            while x < line.len() {
+                if !line[x] {
+                    x += 1;
+                    continue;
+                }
+                let start = x;
+                while x < line.len() && line[x] {
+                    x += 1;
+                }
+                // the run, within the pane
+                let (x0, x1) = ((start * BLOCK) as i32, (x * BLOCK) as i32);
+                let (y0, y1) = (((row * BLOCK) as i32).max(py), ((row + 1) * BLOCK) as i32);
+                let y1 = y1.min(py + ph);
+                if y1 <= y0 {
+                    continue;
+                }
+                let square = [x0 as f32, y0 as f32, (x1 - x0) as f32, (y1 - y0) as f32];
+                let uniforms = [(loc[2], 4, square), (loc[3], 4, p)];
+                gfx.custom(
+                    *prog,
+                    &uniforms,
+                    &[(loc[0], self.tex), (loc[1], self.still)],
+                    x0 as f64,
+                    y0 as f64,
+                    x1 as f64,
+                    y1 as f64,
+                    crate::gfx::Blend::Premultiplied,
+                );
+            }
+        }
+    }
+}
+
+/// A copy of a picture.
+fn copied(s: &ImageSurface) -> ImageSurface {
+    let out = crate::util::surface_rgb(s.width(), s.height());
+    {
+        let c = crate::util::ctx(&out);
+        if c.set_source_surface(s, 0.0, 0.0).is_ok() {
+            let _ = c.paint();
+        }
+    }
+    out
+}
+
 /// A monitor's wall: its still picture, handed to the desktop (or shown in a window of our own), and
 /// the live window over it. `lead`: the one whose picture a desktop of one picture shows.
 fn open_monitor(
@@ -664,12 +873,17 @@ fn open_monitor(
     w: &mut World,
     desktop: Option<&dyn Desktop>,
     lead: bool,
+    // the desktop's icons are followed: the still picture is kept for laying them over the live one
+    keep: bool,
 ) -> Result<Monitor, String> {
     let mut still = crate::util::surface_rgb(s.w, s.h);
     let mut mon = {
         let c = cairo::Context::new(&still).map_err(|e| e.to_string())?;
         Monitor::new(d, s, th.clone(), &o.host, header, edges, w, Some(&c))?
     };
+    if keep {
+        mon.picture = Some(copied(&still));
+    }
     match desktop {
         Some(desk) => {
             if desk.per_monitor() || lead {

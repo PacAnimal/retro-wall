@@ -123,6 +123,17 @@ pub trait Display {
     fn wallpaper_hidden(&self) -> bool {
         false
     }
+    /// What the desktop draws over its wallpaper (its icons, their names, a selection), followed from
+    /// the first call on: the rectangles of the desktop it has drawn on since the last call (all of it
+    /// at first, and when a new desktop comes). None while no desktop draws over the wallpaper, or where
+    /// it cannot be followed.
+    fn desktop_drawn(&mut self) -> Option<Vec<Rect>> {
+        None
+    }
+    /// What the desktop draws in a rectangle of the desktop, RGB by row, whatever covers it.
+    fn desktop_pixels(&self, _x: i32, _y: i32, _w: i32, _h: i32) -> Option<Vec<[u8; 3]>> {
+        None
+    }
 }
 
 /// The machine and its desktop.
