@@ -1,0 +1,24 @@
+#!/bin/sh
+# In the container (tools/browser/run): build, then an XFCE desktop on Xvfb with a few icons on it and
+# the wall over it, shared by x11vnc and served by websockify with a page of our own (index.html).
+#
+#   serve WxH [RETRO-WALL OPTION]...
+set -eu
+size=$1
+shift
+cargo build --release --locked
+Xvfb :1 -screen 0 "${size}x24" -nolisten tcp +extension GLX -noreset >/dev/null 2>&1 &
+export DISPLAY=:1 XDG_CURRENT_DESKTOP=XFCE
+while ! [ -e /tmp/.X11-unix/X1 ]; do sleep 0.1; done
+eval "$(dbus-launch --sh-syntax)"
+# something on the desktop to click
+mkdir -p ~/Desktop/Projects
+echo "Double-click me: I open in Mousepad." >~/Desktop/notes.txt
+xfwm4 --compositor=off >/dev/null 2>&1 &
+xfdesktop >/dev/null 2>&1 &
+x11vnc -display :1 -forever -shared -nopw -localhost -quiet -rfbport 5900 >/dev/null 2>&1 &
+cp /src/tools/browser/index.html /usr/share/novnc/index.html
+websockify --web /usr/share/novnc 6080 localhost:5900 >/dev/null 2>&1 &
+sleep 2 # xfdesktop up, so the wall hands it the picture
+# software GL on every core would starve the server and the viewer: the wall yields to them
+LP_NUM_THREADS=4 nice -n 10 /target/release/retro-wall --software "$@"

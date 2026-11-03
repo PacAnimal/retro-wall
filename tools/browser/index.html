@@ -1,0 +1,51 @@
+<!doctype html>
+<!-- The screen alone, scaled to the window; connecting again and again until it answers. -->
+<html>
+<head>
+<meta charset="utf-8">
+<title>retro-wall</title>
+<style>
+html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+#screen { position: fixed; inset: 0; }
+#status { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+          color: #9a9a9a; font: 15px ui-monospace, Menlo, monospace; pointer-events: none; }
+#status[hidden] { display: none; }
+</style>
+</head>
+<body>
+<div id="screen"></div>
+<div id="status"></div>
+<script type="module">
+import RFB from './core/rfb.js';
+
+const screen = document.getElementById('screen');
+const status = document.getElementById('status');
+const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/websockify`;
+let attempt = 0;
+
+function connect() {
+    attempt++;
+    status.textContent = `Connecting... (attempt ${attempt})`;
+    status.hidden = false;
+    let rfb;
+    try {
+        rfb = new RFB(screen, url);
+    } catch (e) {
+        setTimeout(connect, 1000);
+        return;
+    }
+    rfb.scaleViewport = true;
+    rfb.background = '#000';
+    rfb.focusOnClick = true;
+    rfb.addEventListener('connect', () => {
+        attempt = 0;
+        status.hidden = true;
+        rfb.focus();
+    });
+    rfb.addEventListener('disconnect', () => setTimeout(connect, 1000));
+}
+
+connect();
+</script>
+</body>
+</html>
