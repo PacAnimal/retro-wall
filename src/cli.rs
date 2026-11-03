@@ -14,9 +14,9 @@ pub const USAGE: &str = "usage: retro-wall [--theme NAME] [--config FILE] [--hos
                   [--interface NAME]... [--ip-url URL] [--reserve-EDGE [MONITOR=]PX]...
                   [--software] [--demo [HH:mm]] [--all-monitors | MONITOR]
            the live desktop
-       retro-wall --snapshot FILE [--at SECONDS] [--demo HH:mm] [--theme NAME]
-                  [--host NAME|-] [--battery] [--reserve-EDGE PX]...
-           one frame of it, to a PNG
+       retro-wall --snapshot FILE [--at SECONDS] [--frames N [--fps F]] [--demo HH:mm]
+                  [--theme NAME] [--host NAME|-] [--battery] [--reserve-EDGE PX]...
+           one frame of it, to a PNG; or N frames of it playing, FILE-0000.png on
        retro-wall --preview FILE WIDTHxHEIGHT [--theme NAME] [--battery] [--demo HH:mm]
                   [--reserve-EDGE PX]... [HOST|-]
            the still picture, to a PNG
@@ -47,7 +47,11 @@ pub const USAGE: &str = "usage: retro-wall [--theme NAME] [--config FILE] [--hos
   --software          animate on a software OpenGL renderer too (without it, on Linux, a
                       software-only display is drawn through VirtualGL's vglrun if installed)
   --demo [HH:mm]      made-up readings, and the time of day held at HH:mm
-  --host NAME         the name shown, instead of this machine's; - shows no header";
+  --host NAME         the name shown, instead of this machine's; - shows no header
+  --at SECONDS        a snapshot's time on the scene's clock (played frames start there)
+  --frames N          a snapshot of N frames, the wall playing on made-up readings, each drawn
+                      at its own time however long drawing takes (smooth on a busy machine)
+  --fps F             played frames a second, 10 to 120 (default 30)";
 
 /// What to do.
 #[derive(Debug, PartialEq)]
@@ -114,6 +118,9 @@ pub struct Args {
     pub software: bool,
     pub reserve: Reserve,
     pub at: f64,
+    /// --frames N: a snapshot of N played frames.
+    pub frames: Option<u32>,
+    pub fps: f64,
 }
 
 impl Default for Args {
@@ -136,6 +143,8 @@ impl Default for Args {
             software: false,
             reserve: Reserve::default(),
             at: 7.25,
+            frames: None,
+            fps: 30.0,
         }
     }
 }
@@ -178,6 +187,7 @@ pub fn parse(args: &[String]) -> Result<(Command, Args), String> {
     };
     let mut command = command;
     let mut positional: Option<String> = None;
+    let mut fps_given = false;
     while let Some(arg) = it.next() {
         let mut value = |what: &str| it.next().map(str::to_string).ok_or(format!("{arg} {what}"));
         match arg {
@@ -197,6 +207,14 @@ pub fn parse(args: &[String]) -> Result<(Command, Args), String> {
             "--interface" => a.interfaces.push(value("NAME")?),
             "--ip-url" => a.ip_url = value("URL")?,
             "--at" => a.at = number(&value("SECONDS")?, arg, 0.0, 1e9)?,
+            "--frames" => {
+                let v = value("N")?;
+                a.frames = Some(v.parse::<u32>().ok().filter(|n| (1..=100_000).contains(n)).ok_or(format!("--frames {v}: a whole number, 1 to 100000"))?);
+            }
+            "--fps" => {
+                a.fps = number(&value("F")?, arg, 10.0, 120.0)?;
+                fps_given = true;
+            }
             "--snapshot" if command == Command::Live => command = Command::Snapshot(value("FILE")?),
             "--demo" => {
                 a.demo = true;
@@ -221,6 +239,10 @@ pub fn parse(args: &[String]) -> Result<(Command, Args), String> {
     match (&command, positional) {
         (Command::Preview(..), Some(h)) => a.host = Some(h),
         (Command::Snapshot(_), Some(p)) => return Err(format!("{p}: a snapshot is of the primary monitor")),
+        (Command::Snapshot(_), None) if a.frames.is_none() && fps_given => return Err("--fps: with --frames N".into()),
+        (c, _) if !matches!(c, Command::Snapshot(_)) && (a.frames.is_some() || fps_given) => {
+            return Err("--frames and --fps: with --snapshot".into());
+        }
         (_, Some(m)) if a.all_monitors => return Err(format!("{m}: --all-monitors or a MONITOR, not both")),
         (_, Some(m)) => a.monitor = Some(m),
         (_, None) => {}

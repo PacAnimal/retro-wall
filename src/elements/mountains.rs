@@ -519,10 +519,14 @@ impl Mountains {
         out
     }
 
-    /// Key that changes once a minute, so the frost is remade; 0 in a snapshot.
+    /// Key that changes once a minute, so the frost is remade; 0 in a snapshot. With made-up readings,
+    /// on the wall's own clock, which played frames hold.
     fn frost_key(&self, w: &World) -> i64 {
         if w.frozen.is_some() || self.frost == 0.0 {
             return 0;
+        }
+        if w.demo {
+            return (w.clock_real / 60.0) as i64;
         }
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64 / 60).unwrap_or(0)
     }

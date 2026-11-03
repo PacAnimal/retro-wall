@@ -296,19 +296,52 @@ fn lead(want: &[(Screen, Header, Edges)]) -> Option<String> {
     want.iter().find(|(_, h, _)| h.contains(Piece::Title)).or(want.first()).map(|(s, _, _)| s.name.clone())
 }
 
-/// One frame from fixed inputs, read back from GL, saved as a PNG.
-pub fn snapshot(loaded: &Loaded, path: &str, host: &str, show_header: bool, at: f64, reserve: &Reserve) {
-    let mut file = std::fs::File::create(path).unwrap_or_else(|e| {
-        crate::errln!("--snapshot {path}: {e}");
+/// What --snapshot draws: one still frame, or frames played.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Shot {
+    /// One frame from fixed inputs: canned readings, the reels and needles at rest.
+    Still,
+    /// Frames of the live wall as it plays: made-up readings, everything moving, at `fps` a second.
+    Frames { count: u32, fps: f64 },
+}
+
+/// Seconds a played run goes on before its first frame, so needles, reels and traffic have settled
+/// as on a wall that has run for a while; less when --at is earlier.
+pub const WARM: f64 = 20.0;
+
+/// FILE with frame i's number before its extension: out.png, 7 → out-0007.png.
+pub fn frame_file(path: &str, i: u32) -> String {
+    let p = std::path::Path::new(path);
+    let stem = p.file_stem().map_or_else(|| path.into(), |s| s.to_string_lossy());
+    let ext = p.extension().map_or_else(String::new, |e| format!(".{}", e.to_string_lossy()));
+    let name = format!("{stem}-{i:04}{ext}");
+    match p.parent().filter(|d| !d.as_os_str().is_empty()) {
+        Some(d) => d.join(name).to_string_lossy().into_owned(),
+        None => name,
+    }
+}
+
+/// --snapshot: one frame from fixed inputs, or frames played on a clock of their own, so each is
+/// what the wall shows at its time however long it takes to draw. Read back from GL, saved as PNGs.
+pub fn snapshot(loaded: &Loaded, path: &str, host: &str, show_header: bool, at: f64, reserve: &Reserve, shot: Shot) {
+    let first = if shot == Shot::Still { path.to_string() } else { frame_file(path, 0) };
+    if let Err(e) = std::fs::File::create(&first) {
+        crate::errln!("--snapshot {first}: {e}");
         std::process::exit(2)
-    });
+    }
     let mut d = Native::open().unwrap_or_else(|e| fail(&e));
     let s = pick(&d.screens(), None).unwrap_or_else(|| fail("no monitor"));
     let th = loaded.look(crate::day::lighting_phase(loaded).as_deref());
     let header = if show_header { header(&th.monitors, &s.name, std::slice::from_ref(&s), true) } else { Header::NONE };
-    let mut w = world(&th, Some(Frozen { at, mains: true }), true);
-    w.traffic.sample(at, true);
-    w.traffic.held = true;
+    let mut w = match shot {
+        Shot::Still => {
+            let mut w = world(&th, Some(Frozen { at, mains: true }), true);
+            w.traffic.sample(at, true);
+            w.traffic.held = true;
+            w
+        }
+        Shot::Frames { .. } => world(&th, None, true),
+    };
     w.network = sources::network_demo();
     let mut out = cairo::ImageSurface::create(cairo::Format::Rgb24, s.w, s.h).unwrap_or_else(|e| fail(&format!("a {}x{} picture: {e}", s.w, s.h)));
     let made = cairo::Context::new(&out).map_err(|e| e.to_string()).and_then(|c| {
@@ -316,29 +349,64 @@ pub fn snapshot(loaded: &Loaded, path: &str, host: &str, show_header: bool, at: 
         Monitor::new(&mut d, &s, th, host, header, edges, &mut w, Some(&c))
     });
     let mut m = made.unwrap_or_else(|e| fail(&e));
-    m.state_at(at, &mut w);
-    // the faces' first answers, as live shows them; a face that does not answer fails at its deadline
-    let until = Instant::now() + crate::plugins::FACE_DEADLINE + Duration::from_millis(500);
-    while m.parts.iter().any(|p| p.waiting()) && Instant::now() < until {
-        std::thread::sleep(Duration::from_millis(10));
-        m.state_at(at, &mut w);
+    let (count, fps) = match shot {
+        Shot::Still => (1, 1.0),
+        Shot::Frames { count, fps } => (count, fps),
+    };
+    // played: the scene's clock from `at` less the warm-up, every clock moved on a frame at a time
+    let warm = if shot == Shot::Still { 0 } else { (WARM.min(at) * fps).round() as u32 };
+    let mut sampler = sources::Sampler::new(true);
+    let start = 1000.0;
+    if shot != Shot::Still {
+        m.clock = at - warm as f64 / fps;
     }
-    m.render(&w);
-    let px = m.gfx.read();
-    let (_, y, pw, ph) = m.gfx.rect;
-    {
-        let stride = out.stride() as usize;
-        let Ok(mut data) = out.data() else { fail("the picture's pixels") };
-        for r in 0..ph as usize {
-            let dst = (y as usize + r) * stride;
-            data[dst..dst + pw as usize * 4].copy_from_slice(&px[r * pw as usize * 4..(r + 1) * pw as usize * 4]);
+    let step = |m: &mut Monitor, w: &mut World, sampler: &mut sources::Sampler, i: u32| {
+        let t = start + i as f64 / fps;
+        if shot != Shot::Still {
+            sources::hold_demo_time(t);
+            sampler.step(&w.readings, t);
+            w.traffic.sample(t, true);
+            m.state = None; // every frame its own state, whatever the parts' pace
+        }
+        m.state_at(if shot == Shot::Still { at } else { t }, w);
+    };
+    for i in 0..warm {
+        step(&mut m, &mut w, &mut sampler, i);
+    }
+    for f in 0..count {
+        let i = warm + f;
+        step(&mut m, &mut w, &mut sampler, i);
+        // the faces' first answers, as live shows them; a face that does not answer fails at its deadline
+        let until = Instant::now() + crate::plugins::FACE_DEADLINE + Duration::from_millis(500);
+        while f == 0 && m.parts.iter().any(|p| p.waiting()) && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(10));
+            m.state = None;
+            step(&mut m, &mut w, &mut sampler, i);
+        }
+        m.render(&w);
+        let px = m.gfx.read();
+        let (_, y, pw, ph) = m.gfx.rect;
+        {
+            let stride = out.stride() as usize;
+            let Ok(mut data) = out.data() else { fail("the picture's pixels") };
+            for r in 0..ph as usize {
+                let dst = (y as usize + r) * stride;
+                data[dst..dst + pw as usize * 4].copy_from_slice(&px[r * pw as usize * 4..(r + 1) * pw as usize * 4]);
+            }
+        }
+        let file = if shot == Shot::Still { path.to_string() } else { frame_file(path, f) };
+        let written = std::fs::File::create(&file).map_err(|e| e.to_string()).and_then(|mut fh| out.write_to_png(&mut fh).map_err(|e| e.to_string()));
+        if let Err(e) = written {
+            crate::errln!("--snapshot {file}: {e}");
+            std::process::exit(2)
+        }
+        if shot == Shot::Still {
+            crate::outln!("{path}: written");
         }
     }
-    if let Err(e) = out.write_to_png(&mut file) {
-        crate::errln!("--snapshot {path}: {e}");
-        std::process::exit(2)
+    if let Shot::Frames { count, fps } = shot {
+        crate::outln!("{first}: {count} frames at {fps} a second, from {at} s on the scene's clock");
     }
-    crate::outln!("{path}: written");
 }
 
 fn now(t0: Instant) -> f64 {

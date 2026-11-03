@@ -96,7 +96,10 @@ fn main() {
     };
     match command {
         Command::Preview(file, w, h) => cli::preview(loaded.look(day::lighting_phase(&loaded).as_deref()), &file, w, h, &host, header, &a.reserve),
-        Command::Snapshot(file) => live::snapshot(&loaded, &file, &host, header, a.at, &a.reserve),
+        Command::Snapshot(file) => {
+            let shot = a.frames.map_or(live::Shot::Still, |count| live::Shot::Frames { count, fps: a.fps });
+            live::snapshot(&loaded, &file, &host, header, a.at, &a.reserve, shot)
+        }
         Command::Wallpaper => live::wallpapers(&loaded, &options(a)),
         Command::Live => live::run(&loaded, options(a)),
     }

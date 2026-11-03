@@ -96,8 +96,9 @@ impl Tape {
     const SAMPLE: f64 = 0.05;
     const STEP: f64 = 6.0;
 
-    fn new() -> Self {
-        let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as i64).unwrap_or(0);
+    /// A tape whose stops and spools follow `seed`, or the time it starts when None.
+    fn new(seed: Option<i64>) -> Self {
+        let seed = seed.unwrap_or_else(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as i64).unwrap_or(0));
         Tape {
             angle: 0.0,
             speed: 0.0,
@@ -189,7 +190,7 @@ pub struct Deck {
 
 impl Deck {
     fn new(name: &str, t: DeckSettings) -> Self {
-        Deck { b: Base::new(name), label: t.label, tape: Tape::new(), angle: 0.0, centres: vec![], size: 0.0, fps: (30.0, 60.0) }
+        Deck { b: Base::new(name), label: t.label, tape: Tape::new(None), angle: 0.0, centres: vec![], size: 0.0, fps: (30.0, 60.0) }
     }
     /// The deck's (left, top, scale) in its card.
     fn frame(&self, th: &Theme) -> Option<(f64, f64, f64)> {
@@ -262,8 +263,8 @@ impl Widget for Deck {
             }
         }
     }
-    fn start(&mut self, g: &Geo, _w: &World, _s: &Shared) {
-        self.tape = Tape::new();
+    fn start(&mut self, g: &Geo, w: &World, _s: &Shared) {
+        self.tape = Tape::new(w.demo.then_some(1)); // made-up readings play the same way every time
         (self.centres, self.size) = self.reels(&g.th);
         self.fps = (g.th.tw.fps, g.th.tw.reel_fps);
     }
