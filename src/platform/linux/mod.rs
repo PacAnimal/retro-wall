@@ -1,6 +1,7 @@
 //! Linux: X11 and GLX for the display, /proc and /sys for the machine, the desktop environments'
 //! own tools for their wallpaper.
 
+pub mod composite;
 pub mod desktop;
 pub mod font;
 pub mod system;

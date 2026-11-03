@@ -1,7 +1,10 @@
 //! X11 and GLX: wallpaper windows (desktop type, below all others, on every workspace, off the taskbar,
 //! click-through), each with a GL context sharing the first one's objects, and what the display knows:
-//! monitors, panel struts, DPMS, and which windows cover the desktop.
+//! monitors, panel struts, DPMS, which windows cover the desktop, and what the desktop's own window
+//! draws over its wallpaper (its icons), read from the pixmap the server keeps of it and followed by its
+//! damage.
 
+use super::composite::{Composite, DamageNotify};
 use crate::platform::{Edges, Rect, Screen, WindowId};
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
@@ -112,6 +115,22 @@ pub struct X {
     /// A live context whose objects new ones share.
     share: glx::GLXContext,
     gl_loaded: bool,
+    /// Composite and Damage, once the desktop's window is followed; None before, or without them.
+    comp: Option<Composite>,
+    following_desk: bool,
+    desk: Option<Desk>,
+    /// Rectangles of the desktop its window has drawn on since last asked.
+    drawn: Vec<Rect>,
+}
+
+/// The desktop's own window (its icons over its wallpaper), followed: its damage, the pixmap holding
+/// what it shows, and where it is on the root window.
+struct Desk {
+    win: c_ulong,
+    damage: c_ulong,
+    pixmap: c_ulong,
+    at: (i32, i32),
+    size: (i32, i32),
 }
 
 impl X {
@@ -134,7 +153,24 @@ impl X {
             let root = (xl.XDefaultRootWindow)(dpy);
             let screen = (xl.XDefaultScreen)(dpy);
             let atoms = Atoms::intern(&xl, dpy, screen);
-            Ok(X { xl, glx, xf, dp, rr, dpy, root, screen, atoms, wins: HashMap::new(), share: null_mut(), gl_loaded: false })
+            Ok(X {
+                xl,
+                glx,
+                xf,
+                dp,
+                rr,
+                dpy,
+                root,
+                screen,
+                atoms,
+                wins: HashMap::new(),
+                share: null_mut(),
+                gl_loaded: false,
+                comp: None,
+                following_desk: false,
+                desk: None,
+                drawn: vec![],
+            })
         }
     }
 
@@ -247,6 +283,126 @@ impl X {
             let ctx = create(self.dpy, config, self.share, 1, attribs.as_ptr());
             (self.xl.XSync)(self.dpy, 0);
             if ctx.is_null() { legacy() } else { Some((ctx, true)) }
+        }
+    }
+
+    /// An event about the desktop's window: what it drew, or it came, went, moved. Whether it was one.
+    fn watch_desk(&mut self, e: &xlib::XEvent) -> bool {
+        let damage = self.comp.as_ref().map(|c| c.damage_event);
+        // SAFETY: each variant read is the one the event's type says.
+        unsafe {
+            match (e.get_type(), &self.desk) {
+                (t, Some(d)) if Some(t) == damage => {
+                    let n = &*(e as *const xlib::XEvent as *const DamageNotify);
+                    if n.damage == d.damage {
+                        let (x, y) = (d.at.0 + n.area.x as i32, d.at.1 + n.area.y as i32);
+                        self.drawn.push(Rect::new(x as i64, y as i64, (x + n.area.width as i32) as i64, (y + n.area.height as i32) as i64));
+                        if n.more == 0
+                            && let Some(c) = &self.comp
+                        {
+                            c.repaired(self.dpy, d.damage);
+                        }
+                    }
+                    true
+                }
+                // the desktop window's own copy of each (the root's, of the same, is passed over)
+                (xlib::DestroyNotify, Some(d)) if e.destroy_window.window == d.win && e.destroy_window.event == d.win => {
+                    self.lose_desk();
+                    self.find_desk();
+                    true
+                }
+                (xlib::UnmapNotify, Some(d)) if e.unmap.window == d.win && e.unmap.event == d.win => {
+                    self.lose_desk();
+                    self.find_desk();
+                    true
+                }
+                (xlib::ConfigureNotify, Some(d)) if e.configure.window == d.win && e.configure.event == d.win => {
+                    // moved or resized: its pixmap named anew
+                    self.lose_desk();
+                    self.find_desk();
+                    true
+                }
+                (xlib::MapNotify, None) if self.following_desk && e.map.event == self.root => {
+                    self.find_desk();
+                    true
+                }
+                _ => false,
+            }
+        }
+    }
+
+    /// The desktop's own window, if one shows: of the desktop's type, mapped, not ours, the largest.
+    fn find_desk(&mut self) {
+        let Some(comp) = &self.comp else { return };
+        let mut best: Option<(c_ulong, (i32, i32), (i32, i32))> = None;
+        for w in self.clients().unwrap_or_default() {
+            if self.wins.contains_key(&WindowId(w)) || !self.longs(w, self.atoms.wm_type, 16).unwrap_or_default().contains(&self.atoms.type_desktop) {
+                continue;
+            }
+            // SAFETY: an open display; XWindowAttributes is plain data, filled in by the call; out-pointers to locals.
+            unsafe {
+                let mut a: xlib::XWindowAttributes = std::mem::zeroed();
+                // mapped, and opaque: a transparent (depth 32) desktop's clear pixels would read as black
+                if (self.xl.XGetWindowAttributes)(self.dpy, w, &mut a) == 0 || a.map_state != 2 || a.depth != 24 {
+                    continue;
+                }
+                let (mut x, mut y, mut child) = (0, 0, 0);
+                (self.xl.XTranslateCoordinates)(self.dpy, w, self.root, 0, 0, &mut x, &mut y, &mut child);
+                if best.is_none_or(|b| b.2.0 * b.2.1 < a.width * a.height) {
+                    best = Some((w, (x, y), (a.width, a.height)));
+                }
+            }
+        }
+        let Some((win, at, size)) = best else { return };
+        // SAFETY: an open display and a window of it; the damage and the pixmap are freed in `lose_desk`.
+        unsafe {
+            (self.xl.XSelectInput)(self.dpy, win, xlib::StructureNotifyMask);
+            let damage = comp.follow(self.dpy, win);
+            let pixmap = comp.pixmap(self.dpy, win);
+            self.desk = Some(Desk { win, damage, pixmap, at, size });
+        }
+        self.drawn.push(Rect::new(at.0 as i64, at.1 as i64, (at.0 + size.0) as i64, (at.1 + size.1) as i64));
+    }
+
+    /// The desktop's window has gone: what was kept of it is let go, and the desktop is drawn anew.
+    fn lose_desk(&mut self) {
+        let (Some(d), Some(comp)) = (self.desk.take(), &self.comp) else { return };
+        // SAFETY: an open display; the damage and pixmap are ours, used no more.
+        unsafe {
+            comp.forget(self.dpy, d.damage);
+            if d.pixmap != 0 {
+                (self.xl.XFreePixmap)(self.dpy, d.pixmap);
+            }
+        }
+        self.drawn.push(Rect::new(d.at.0 as i64, d.at.1 as i64, (d.at.0 + d.size.0) as i64, (d.at.1 + d.size.1) as i64));
+    }
+
+    /// What `drawable` holds in a rectangle, RGB by row: 32-bit pixels in the server's byte order only.
+    fn image(&self, drawable: c_ulong, x: i32, y: i32, w: i32, h: i32) -> Option<Vec<[u8; 3]>> {
+        if w <= 0 || h <= 0 {
+            return None;
+        }
+        // SAFETY: an open display; the image, checked for null, is read within its rows and freed once.
+        unsafe {
+            let img = (self.xl.XGetImage)(self.dpy, drawable, x, y, w as c_uint, h as c_uint, !0, xlib::ZPixmap);
+            if img.is_null() {
+                return None;
+            }
+            let i = &*img;
+            let out = (i.bits_per_pixel == 32 && i.byte_order == xlib::LSBFirst).then(|| {
+                // a pixmap's image has no visual, so no masks: the server's 24-bit true colour
+                let masks = if i.red_mask == 0 { (0xff_0000, 0xff00, 0xff) } else { (i.red_mask, i.green_mask, i.blue_mask) };
+                let shift = |m: c_ulong| m.trailing_zeros();
+                let (rs, gs, bs) = (shift(masks.0), shift(masks.1), shift(masks.2));
+                let mut px = Vec::with_capacity((w * h) as usize);
+                for row in 0..h as usize {
+                    let line = std::slice::from_raw_parts(i.data.add(row * i.bytes_per_line as usize) as *const u32, w as usize);
+                    px.extend(line.iter().map(|&v| [(v >> rs) as u8, (v >> gs) as u8, (v >> bs) as u8]));
+                }
+                px
+            });
+            (self.xl.XDestroyImage)(img);
+            out
         }
     }
 
@@ -478,6 +634,9 @@ impl crate::platform::Display for X {
             while (self.xl.XPending)(self.dpy) > 0 {
                 let mut e: xlib::XEvent = std::mem::zeroed();
                 (self.xl.XNextEvent)(self.dpy, &mut e);
+                if self.watch_desk(&e) {
+                    continue;
+                }
                 let id = WindowId(e.any.window as u64);
                 let Some(w) = self.wins.get_mut(&id) else { continue };
                 match e.get_type() {
@@ -551,6 +710,31 @@ impl crate::platform::Display for X {
         let screens = self.screens();
         !screens.is_empty() && screens.iter().all(|s| builtin_panel(&s.name)) && super::system::lid_closed()
     }
+
+    fn desktop_drawn(&mut self) -> Option<Vec<Rect>> {
+        if !self.following_desk {
+            self.following_desk = true;
+            // SAFETY: the display is open while self lives.
+            self.comp = unsafe { Composite::open(self.dpy) };
+            if self.comp.is_none() {
+                crate::errln!("no Composite or Damage (libXcomposite, libXdamage): the live picture covers the desktop's icons");
+                return None;
+            }
+            // SAFETY: an open display and its root window: told when windows come.
+            unsafe { (self.xl.XSelectInput)(self.dpy, self.root, xlib::SubstructureNotifyMask) };
+            self.find_desk();
+        }
+        // with no desktop window (any more), what it drew last is still taken back
+        if self.desk.is_none() && self.drawn.is_empty() {
+            return None;
+        }
+        Some(std::mem::take(&mut self.drawn))
+    }
+
+    fn desktop_pixels(&self, x: i32, y: i32, w: i32, h: i32) -> Option<Vec<[u8; 3]>> {
+        let d = self.desk.as_ref()?;
+        self.image(d.pixmap, x - d.at.0, y - d.at.1, w, h)
+    }
 }
 
 /// Whether a RandR output name is a laptop's own panel.
@@ -560,6 +744,7 @@ pub fn builtin_panel(name: &str) -> bool {
 
 impl Drop for X {
     fn drop(&mut self) {
+        self.lose_desk();
         let ids: Vec<WindowId> = self.wins.keys().copied().collect();
         for id in ids {
             crate::platform::Display::close(self, id);
