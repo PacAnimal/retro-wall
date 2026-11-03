@@ -44,3 +44,11 @@ ci/windows/cargo build --release             # target/x86_64-pc-windows-gnu/rele
 - No import library of the gcc runtime is left in the image: Rust links with `-Bdynamic` and would
   take the DLL. A project's own `CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS` replaces the image's,
   which close the link: add to them.
+
+## Tests (Linux)
+
+```sh
+docker build -t retro-wall-test ci/test
+docker run --rm -v "$PWD:/src" -w /src -e CARGO_TARGET_DIR=/src/target/test retro-wall-test \
+	sh -c 'cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test --release'
+```
