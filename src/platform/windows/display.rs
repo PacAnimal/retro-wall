@@ -32,7 +32,7 @@ use windows_sys::Win32::Graphics::Gdi::{
 };
 use windows_sys::Win32::Graphics::OpenGL::{
     ChoosePixelFormat, HGLRC, PFD_DOUBLEBUFFER, PFD_DRAW_TO_WINDOW, PFD_MAIN_PLANE, PFD_SUPPORT_OPENGL, PFD_TYPE_RGBA, PIXELFORMATDESCRIPTOR, SetPixelFormat,
-    SwapBuffers, wglCreateContext, wglDeleteContext, wglGetProcAddress, wglMakeCurrent, wglShareLists,
+    SwapBuffers, wglCreateContext, wglDeleteContext, wglGetCurrentContext, wglGetCurrentDC, wglGetProcAddress, wglMakeCurrent, wglShareLists,
 };
 use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress, LoadLibraryW};
 use windows_sys::Win32::System::Power::{POWERBROADCAST_SETTING, RegisterPowerSettingNotification};
@@ -63,6 +63,9 @@ struct Pane {
     ctx: HGLRC,
     core: bool,
     rect: (i32, i32, i32, i32),
+    /// A still window's picture: RGBA, its rows bottom up, as glDrawPixels takes them. It draws it
+    /// again itself, and is never handed to the caller to draw.
+    still: Option<Vec<u8>>,
 }
 
 /// The window the panes are children of.
@@ -77,6 +80,11 @@ struct Host {
 
 type CreateContextAttribs = unsafe extern "system" fn(HDC, HGLRC, *const i32) -> HGLRC;
 type SwapInterval = unsafe extern "system" fn(i32) -> i32;
+/// What GetProcAddress gives.
+type Proc = unsafe extern "system" fn() -> isize;
+/// OpenGL 1.0's, which opengl32 exports and the core-profile bindings do not have.
+type RasterPos2f = unsafe extern "system" fn(f32, f32);
+type DrawPixels = unsafe extern "system" fn(i32, i32, u32, u32, *const c_void);
 
 pub struct Win {
     instance: HMODULE,
@@ -455,7 +463,47 @@ impl Win {
             }
         }
         crate::outln!("{} window(s) made again in the desktop window", remade.len());
-        remade
+        self.paint_stills(remade)
+    }
+
+    /// The still windows among `ids` drawn again; the others, for the caller to draw.
+    fn paint_stills(&mut self, ids: Vec<WindowId>) -> Vec<WindowId> {
+        ids.into_iter()
+            .filter(|id| {
+                let still = self.panes.get(id).is_some_and(|p| p.still.is_some());
+                if still {
+                    self.paint_still(*id);
+                }
+                !still
+            })
+            .collect()
+    }
+
+    /// A still window's picture drawn, and shown. The caller's context is current again after.
+    fn paint_still(&mut self, id: WindowId) {
+        let Some(&Pane { dc, ctx, rect: (_, _, w, h), .. }) = self.panes.get(&id) else { return };
+        // SAFETY: opengl32's exports, with these types by OpenGL 1.0; the pane's own DC and context,
+        // current while GL draws; the picture is w x h RGBA, in rows of 4-byte multiples (the default
+        // unpack alignment). The context current before is made current again.
+        unsafe {
+            let (Some(raster), Some(draw)) =
+                (GetProcAddress(self.opengl32, c"glRasterPos2f".as_ptr().cast()), GetProcAddress(self.opengl32, c"glDrawPixels".as_ptr().cast()))
+            else {
+                return;
+            };
+            let (raster, draw) = (std::mem::transmute::<Proc, RasterPos2f>(raster), std::mem::transmute::<Proc, DrawPixels>(draw));
+            let (was_dc, was_ctx) = (wglGetCurrentDC(), wglGetCurrentContext());
+            wglMakeCurrent(dc, ctx);
+            self.load_gl();
+            if let Some(still) = self.panes.get(&id).and_then(|p| p.still.as_ref()) {
+                gl::Viewport(0, 0, w, h);
+                gl::PixelStorei(gl::UNPACK_ALIGNMENT, 4);
+                raster(-1.0, -1.0);
+                draw(w, h, gl::RGBA, gl::UNSIGNED_BYTE, still.as_ptr().cast());
+                SwapBuffers(dc);
+            }
+            wglMakeCurrent(was_dc, was_ctx);
+        }
     }
 
     /// The panes moved back over their monitors when the host's origin moved (a monitor added left
@@ -569,7 +617,33 @@ impl crate::platform::Display for Win {
         };
         let id = WindowId(self.next_id);
         self.next_id += 1;
-        self.panes.insert(id, Pane { hwnd, dc, ctx, core, rect: (x, y, w, h) });
+        self.panes.insert(id, Pane { hwnd, dc, ctx, core, rect: (x, y, w, h), still: None });
+        Ok(id)
+    }
+
+    /// The picture in a window of its own, drawn with OpenGL 1.0's glDrawPixels, which every driver has
+    /// (Windows' own GDI Generic, all a remote session without a GPU gets, has 1.1).
+    fn still_window(&mut self, x: i32, y: i32, w: i32, h: i32, rgba: &[u8]) -> Result<WindowId, String> {
+        if w <= 0 || h <= 0 || rgba.len() != w as usize * h as usize * 4 {
+            return Err(format!("a still window of {w}x{h} with {} bytes", rgba.len()));
+        }
+        let (hwnd, dc) = self.child((x, y, w, h))?;
+        // SAFETY: dc has its pixel format; the context, window and DC are released on failure.
+        let ctx = unsafe {
+            let ctx = wglCreateContext(dc);
+            if ctx.is_null() {
+                ReleaseDC(hwnd, dc);
+                DestroyWindow(hwnd);
+                return Err("the driver made no OpenGL context".into());
+            }
+            ctx
+        };
+        let row = w as usize * 4;
+        let still = rgba.chunks_exact(row).rev().flatten().copied().collect();
+        let id = WindowId(self.next_id);
+        self.next_id += 1;
+        self.panes.insert(id, Pane { hwnd, dc, ctx, core: false, rect: (x, y, w, h), still: Some(still) });
+        self.paint_still(id);
         Ok(id)
     }
 
@@ -609,7 +683,7 @@ impl crate::platform::Display for Win {
             }
         }
         if self.share == p.ctx {
-            self.share = self.panes.values().next().map_or(null_mut(), |p| p.ctx);
+            self.share = self.panes.values().find(|p| p.still.is_none()).map_or(null_mut(), |p| p.ctx);
         }
     }
 
@@ -653,7 +727,7 @@ impl crate::platform::Display for Win {
                 out.push(*id);
             }
         }
-        out
+        self.paint_stills(out)
     }
 
     fn wait(&self, timeout: Duration) {

@@ -80,6 +80,16 @@ struct Monitor {
     pane: (i32, i32, i32, i32),
 }
 
+/// A monitor whose OpenGL cannot draw the live wall (older than 2.1, as Windows' own renderer in a
+/// remote session without a GPU): its still picture without the instruments, in a window of its own,
+/// never animated. `header` is what the monitor would show live, to tell when that changes.
+struct Still {
+    screen: Screen,
+    header: Header,
+    edges: Edges,
+    window: WindowId,
+}
+
 const FADE: f64 = 1.0;
 const SLOW: f64 = 1.5;
 
@@ -594,6 +604,7 @@ pub fn run(loaded: &Loaded, o: Options) {
     }
     let t0 = Instant::now();
     let mut monitors: Vec<Monitor> = vec![];
+    let mut stills: Vec<Still> = vec![];
     let mut paused: Option<&str> = None;
     let mut timers = Timers::new();
     let mut current: Option<WindowId> = None;
@@ -656,9 +667,17 @@ pub fn run(loaded: &Loaded, o: Options) {
                     }
                 }
                 monitors = kept;
+                for m in std::mem::take(&mut stills) {
+                    if want.iter().any(|(s, h, e)| *s == m.screen && *h == m.header && *e == m.edges) {
+                        stills.push(m);
+                    } else {
+                        crate::outln!("{}: changed or gone: closed", m.screen.name);
+                        d.close(m.window);
+                    }
+                }
                 let lead = lead(&want);
                 for (s, h, e) in want {
-                    if monitors.iter().any(|m| m.screen == s) {
+                    if monitors.iter().any(|m| m.screen == s) || stills.iter().any(|m| m.screen == s) {
                         continue;
                     }
                     let is_lead = lead.as_deref() == Some(s.name.as_str());
@@ -668,7 +687,13 @@ pub fn run(loaded: &Loaded, o: Options) {
                             current = Some(m.window);
                             monitors.push(m);
                         }
-                        Err(e) => crate::errln!("{}: {e}", s.name),
+                        Err(err) => match open_still(&mut d, &s, &th, h, e, &o, desktop.as_deref(), is_lead) {
+                            Ok(m) => {
+                                crate::outln!("{}: {err}: the still picture, not animating", s.name);
+                                stills.push(m);
+                            }
+                            Err(still) => crate::errln!("{}: {err}; {still}", s.name),
+                        },
                     }
                     if !checked_renderer && !monitors.is_empty() {
                         checked_renderer = true;
@@ -681,7 +706,8 @@ pub fn run(loaded: &Loaded, o: Options) {
                 }
             }
         }
-        if due.look && paused.is_none() && !monitors.is_empty() {
+        // a still picture is never paused: it takes the other look while the live ones stand still
+        if due.look && (paused.is_none() || monitors.is_empty()) && !(monitors.is_empty() && stills.is_empty()) {
             // a theme with day and night looks: the other one when the sun crosses
             let phase = crate::day::lighting_phase(loaded);
             if phase.is_some() && phase != th.phase {
@@ -689,6 +715,9 @@ pub fn run(loaded: &Loaded, o: Options) {
                 th = loaded.look(phase.as_deref());
                 for m in monitors.drain(..) {
                     m.close(&mut d);
+                }
+                for m in stills.drain(..) {
+                    d.close(m.window);
                 }
                 current = None;
                 timers.watch = t;
@@ -712,6 +741,9 @@ pub fn run(loaded: &Loaded, o: Options) {
                 if let Some((b, _, _)) = &m.backdrop {
                     d.raise(*b);
                 }
+                d.raise(m.window);
+            }
+            for m in &stills {
                 d.raise(m.window);
             }
         }
@@ -907,6 +939,44 @@ fn open_monitor(
     }
     crate::platform::release_free_memory();
     Ok(mon)
+}
+
+/// A monitor's still picture without its instruments, handed to the desktop as `open_monitor` does, and in
+/// a window of its own over the whole monitor (a remote session can hide the wallpaper): where the live
+/// window cannot be made.
+fn open_still(
+    d: &mut impl Display,
+    s: &Screen,
+    th: &Arc<Theme>,
+    header: Header,
+    edges: Edges,
+    o: &Options,
+    desktop: Option<&dyn Desktop>,
+    lead: bool,
+) -> Result<Still, String> {
+    // the hostname only: frozen instruments, the graph and the status line would show readings that are untrue
+    let shown = if header.contains(Piece::Title) { Header::of(Piece::Title) } else { Header::NONE };
+    let geo = Geo { px_per_mm: s.px_per_mm(), ..Geo::new(s.w, s.h, &o.host, edges, shown, Some(s.name.clone()), th.clone()) };
+    let mut picture = crate::still::draw(&geo)?;
+    if let Some(desk) = desktop
+        && (desk.per_monitor() || lead)
+    {
+        crate::still::set_wallpaper(th, desk, s, &mut picture);
+    }
+    let stride = picture.stride() as usize;
+    let (w, h) = (s.w as usize, s.h as usize);
+    let data = crate::util::view(&mut picture).ok_or("the still picture cannot be read")?;
+    let mut rgba = Vec::with_capacity(w * h * 4);
+    for row in data.chunks(stride).take(h) {
+        for px in row[..w * 4].as_chunks::<4>().0 {
+            let [_, r, g, b] = u32::from_ne_bytes(*px).to_be_bytes();
+            rgba.extend_from_slice(&[r, g, b, 255]);
+        }
+    }
+    drop(data);
+    let window = d.still_window(s.x, s.y, s.w, s.h, &rgba)?;
+    crate::platform::release_free_memory();
+    Ok(Still { screen: s.clone(), header, edges, window })
 }
 
 /// Whether a GL renderer, by its name, draws on the CPU.
