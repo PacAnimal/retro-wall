@@ -73,6 +73,7 @@ pub fn world(th: &Theme) -> World {
         traffic,
         network: Net { online: Some(true), address: Some("192.168.1.37".into()), router: None, public: Some("203.0.113.37".into()) },
         readings: Arc::new(Mutex::new(HashMap::new())),
+        title_light: 1.0,
     }
 }
 

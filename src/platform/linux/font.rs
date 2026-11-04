@@ -34,7 +34,7 @@ pub fn register_font(path: &Path) -> Result<(), String> {
     let file = CString::new(path.as_os_str().as_bytes()).map_err(|_| format!("{}: a NUL in the path", path.display()))?;
     // a null configuration is the current one: cairo's
     // SAFETY: `add` is fontconfig's FcConfigAppFontAddFile; a null configuration is the current one, the path NUL-terminated.
-    if unsafe { add(std::ptr::null_mut(), file.as_ptr() as *const u8) } == 0 {
+    if unsafe { add(std::ptr::null_mut(), file.as_ptr().cast()) } == 0 {
         return Err(format!("{}: fontconfig would not take it", path.display()));
     }
     Ok(())

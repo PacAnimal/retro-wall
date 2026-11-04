@@ -253,7 +253,7 @@ impl X {
             if std::env::var("RETRO_GL").is_ok_and(|v| v == "2.1") || !self.glx_extension("GLX_ARB_create_context_profile") {
                 return legacy();
             }
-            let Some(create) = (self.glx.glXGetProcAddressARB)(c"glXCreateContextAttribsARB".as_ptr() as *const u8) else {
+            let Some(create) = (self.glx.glXGetProcAddressARB)(c"glXCreateContextAttribsARB".as_ptr().cast()) else {
                 return legacy();
             };
             type Create = unsafe extern "C" fn(*mut xlib::Display, glx::GLXFBConfig, glx::GLXContext, c_int, *const c_int) -> glx::GLXContext;
@@ -576,13 +576,13 @@ impl crate::platform::Display for X {
             if !self.gl_loaded {
                 gl::load_with(|s| {
                     let c = CString::new(s).unwrap_or_default();
-                    (self.glx.glXGetProcAddressARB)(c.as_ptr() as *const u8).map_or(std::ptr::null(), |f| f as *const _)
+                    (self.glx.glXGetProcAddressARB)(c.as_ptr().cast()).map_or(std::ptr::null(), |f| f as *const _)
                 });
                 self.gl_loaded = true;
             }
             // under a compositor it paces the frames: no vsync wait; without one, vsync, or frames tear
             if self.glx_extension("GLX_MESA_swap_control")
-                && let Some(f) = (self.glx.glXGetProcAddressARB)(c"glXSwapIntervalMESA".as_ptr() as *const u8)
+                && let Some(f) = (self.glx.glXGetProcAddressARB)(c"glXSwapIntervalMESA".as_ptr().cast())
             {
                 let f: unsafe extern "C" fn(c_uint) -> c_int = std::mem::transmute(f);
                 f(if self.composited() { 0 } else { 1 });

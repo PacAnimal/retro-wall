@@ -2,8 +2,8 @@
 
 A live desktop wallpaper: a scene that moves (a synthwave horizon, a rainy neon city, an arctic night,
 the digital rain, a winter field, a pirate island, an engine of copper and steam, a road at sunset, a
-forest with a river), with the machine's readings in it: meters, a tape deck that plays with the disks,
-the network's traffic as mountains, its status line.
+forest with a river, a farm of blocks), with the machine's readings in it: meters, a tape deck that
+plays with the disks, the network's traffic as mountains, its status line.
 
 One Rust binary. It draws on the GPU (OpenGL 3.3, or 2.1 on older hardware), presents a frame only when
 something in it changed, and stops while the picture is covered or the machine is on battery.
@@ -70,10 +70,20 @@ Pick one with `--theme NAME`. Click a picture for a full-resolution still.
 <a href="screenshots/themes/forest-4.jpg"><img src="screenshots/themes/forest-4.jpg" width="196" alt="a fourth forest layout"></a>
 <br>Four layouts at 4K: click one for the full picture.
 </td></tr>
+<tr><td>
+<a href="screenshots/themes/blocky.png"><img src="screenshots/themes/blocky.gif" width="800" alt="blocky"></a><br>
+<b>blocky</b>: a block game's farm seen from the hill above it, traced block by block; it follows the clock,
+the torches lighting it at night. Its interface shows the machine: the hearts are the processor's idle time,
+the food the free memory, the experience bar the disk's activity and its level how full the disk is
+<br><img src="screenshots/themes/blocky-times.png" width="800" alt="blocky at 07:00 with the scene alone, at 13:00 with its interface, at 19:15 with the interface and the hand, and at 23:00 with the hostname alone">
+<br>The scene alone, with its interface (the default), with the interface and the hand, and with the hostname.
+</td></tr>
 </table>
 
-matrix, racing and forest show only the scene by default. Set `[monitors]` in `retro.toml` to show the
-hostname, instruments and graph, as here.
+matrix, racing and forest show only the scene by default, and blocky the scene and its interface. Set
+`[monitors]` in `retro.toml` to show the hostname, instruments and graph, as here. blocky's hand is off
+by default: a theme of your own that extends it turns it on (`extends = "blocky"`, then `hand = true`
+under `[element.world]`).
 
 Made a theme of your own? Share it: `retro-wall --new theme NAME` starts one, `EXTENDING.md` shows what
 it can do, and a pull request with the theme and a GIF of it (made from `--snapshot --frames`) puts it here

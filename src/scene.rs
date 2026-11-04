@@ -157,6 +157,9 @@ pub struct World {
     pub traffic: crate::sources::Traffic,
     pub network: Net,
     pub readings: std::sync::Arc<std::sync::Mutex<HashMap<String, crate::sources::Reading>>>,
+    /// How bright the hostname shows, 0 to 1, as solid as ever: a scene that darkens at night lowers
+    /// it, each frame in its `state`, so the lettering does not glare over the dark; 1 otherwise.
+    pub title_light: f64,
 }
 
 impl World {
@@ -241,6 +244,10 @@ pub trait Part {
     }
     /// Whether it fades with the instruments on pausing.
     fn fades(&self) -> bool {
+        false
+    }
+    /// Whether it is the hostname's, and so is darkened to the scene's `World::title_light`.
+    fn dims(&self) -> bool {
         false
     }
     /// Keep its layer as its own texture, never merged with neighbours.
@@ -329,7 +336,7 @@ pub fn hash_f(h: &mut u64, v: f64) {
 
 /// One entry of a frame's plan: a run of still layers as one texture, or a part's live pass.
 pub enum Step {
-    Run { tex: Tex, fade: bool, area: Option<Vec<Rect>>, opaque: bool },
+    Run { tex: Tex, fade: bool, dims: bool, area: Option<Vec<Rect>>, opaque: bool },
     Live(usize, u8),
 }
 
@@ -337,6 +344,7 @@ pub enum Step {
 struct Painted {
     surface: ImageSurface,
     fades: bool,
+    dims: bool,
     /// The rectangles it covers; None for the whole picture.
     area: Option<Vec<Rect>>,
     alone: bool,
@@ -441,11 +449,13 @@ impl Scene {
                 match pass {
                     Pass::Still(k) => {
                         let layer = self.parts[i].layer();
-                        let same = layer.is_some() && layer == current && matches!(entries.last(), Some(Entry::Layer(..)));
+                        // the hostname's layer is shared only with the hostname's, so it alone dims
+                        let dims = self.parts[i].dims();
+                        let same = layer.is_some() && layer == current && matches!(entries.last(), Some(Entry::Layer(l)) if l.dims == dims);
                         if !same {
                             let s = if entries.is_empty() { surface_rgb(g.w, g.h) } else { surface(g.w, g.h) };
                             let p = &self.parts[i];
-                            entries.push(Entry::Layer(Painted { surface: s, fades: p.fades(), area: p.area(&g), alone: p.alone() }));
+                            entries.push(Entry::Layer(Painted { surface: s, fades: p.fades(), dims, area: p.area(&g), alone: p.alone() }));
                         } else if let Some(Entry::Layer(l)) = entries.last_mut()
                             && let Some(area) = l.area.as_mut()
                         {
@@ -469,7 +479,7 @@ impl Scene {
         }
         if !matches!(entries.first(), Some(Entry::Layer(..))) {
             // a scene starts with a still element (elements::trial); without one, it starts black
-            entries.insert(0, Entry::Layer(Painted { surface: surface_rgb(g.w, g.h), fades: false, area: None, alone: false }));
+            entries.insert(0, Entry::Layer(Painted { surface: surface_rgb(g.w, g.h), fades: false, dims: false, area: None, alone: false }));
         }
         self.entries = Some(entries);
     }
@@ -511,7 +521,7 @@ impl Scene {
             } else {
                 Some(disjoint(&run.iter().flat_map(|l| l.area.iter().flatten().copied()).collect::<Vec<_>>()))
             };
-            let fade = run[0].fades;
+            let (fade, dims) = (run[0].fades, run[0].dims);
             run.clear();
             // a run over others keeps only where it has anything drawn, within its area
             let tex = if opaque {
@@ -530,7 +540,7 @@ impl Scene {
                 }
                 up.add_layer(s, r)
             };
-            plan.push(Step::Run { tex, fade, area, opaque });
+            plan.push(Step::Run { tex, fade, dims, area, opaque });
         };
         for e in entries {
             match e {
@@ -540,7 +550,7 @@ impl Scene {
                 }
                 Entry::Layer(l) => {
                     if let Some(last) = run.last()
-                        && (last.fades != l.fades || last.alone || l.alone)
+                        && (last.fades != l.fades || last.dims != l.dims || last.alone || l.alone)
                     {
                         close(&mut run, &mut plan, up);
                     }
@@ -557,13 +567,15 @@ impl Scene {
     }
 }
 
-/// Draw a frame's plan: runs and live passes in order, fading ones at strength p.
+/// Draw a frame's plan: runs and live passes in order, fading ones at strength p, the hostname's
+/// darkened to the scene's `title_light`, as solid as ever.
 pub fn draw_plan(plan: &[Step], parts: &mut [Box<dyn Part>], g: &Geo, gfx: &mut Gfx, w: &World, presence: f64) {
     let p = presence * presence * (3.0 - 2.0 * presence);
     for step in plan {
         match step {
-            Step::Run { tex, fade, area, opaque } => {
-                gfx.layer(*tex, area.as_deref(), if *fade { p } else { 1.0 }, if *opaque { Blend::Opaque } else { Blend::Premultiplied });
+            Step::Run { tex, fade, dims, area, opaque } => {
+                let light = if *dims { w.title_light } else { 1.0 };
+                gfx.layer_lit(*tex, area.as_deref(), if *fade { p } else { 1.0 }, light, if *opaque { Blend::Opaque } else { Blend::Premultiplied });
             }
             Step::Live(i, k) => {
                 if !parts[*i].fades() {

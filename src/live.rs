@@ -335,6 +335,7 @@ fn world(th: &Theme, frozen: Option<Frozen>, demo: bool) -> World {
         traffic: Traffic::new(span, tiers),
         network: Net::default(),
         readings: Arc::new(Mutex::new(HashMap::new())),
+        title_light: 1.0,
     }
 }
 

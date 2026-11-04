@@ -457,6 +457,24 @@ impl Gfx {
     }
 
     /// Reload columns x0..x1 of a texture.
+    /// A picture into part of a texture, its top left at (x, y) of it.
+    pub fn replace_at(&mut self, t: Tex, s: &ImageSurface, x: i32, y: i32) {
+        let Some(data) = pixel_start(s).filter(|_| s.width() > 0 && s.height() > 0) else { return };
+        let tx = &self.textures[t.0 as usize];
+        if x < 0 || y < 0 || x + s.width() > tx.w || y + s.height() > tx.h {
+            return;
+        }
+        // SAFETY: a GL context is current, and no pixel unpack buffer is bound, so GL copies the
+        // width x height pixels from `data`, rows `stride` bytes apart, which lie within the surface's
+        // stride x height bytes, before the call returns; the region lies within the texture (checked).
+        unsafe {
+            gl::BindTexture(gl::TEXTURE_2D, tx.id);
+            gl::PixelStorei(gl::UNPACK_ROW_LENGTH, s.stride() / 4);
+            gl::TexSubImage2D(gl::TEXTURE_2D, 0, x, y, s.width(), s.height(), gl::BGRA, gl::UNSIGNED_BYTE, data.cast());
+            gl::PixelStorei(gl::UNPACK_ROW_LENGTH, 0);
+        }
+    }
+
     pub fn replace_columns(&mut self, t: Tex, s: &ImageSurface, x0: i32, x1: i32) {
         let (x0, x1) = (x0.max(0), x1.min(s.width()));
         let Some(data) = pixel_start(s).filter(|_| x0 < x1) else { return };
@@ -604,6 +622,11 @@ impl Gfx {
 
     /// A picture-sized texture over `area` (or all it holds), at `strength`.
     pub fn layer(&mut self, tex: Tex, area: Option<&[(f64, f64, f64, f64)]>, strength: f64, blend: Blend) {
+        self.layer_lit(tex, area, strength, 1.0, blend);
+    }
+
+    /// The same, its colour darkened by `light` (0 to 1) as it stays as solid: its alpha is kept.
+    pub fn layer_lit(&mut self, tex: Tex, area: Option<&[(f64, f64, f64, f64)]>, strength: f64, light: f64, blend: Blend) {
         if strength <= 0.0 {
             return;
         }
@@ -616,7 +639,8 @@ impl Gfx {
         }
         self.run(Some(tex), blend, n);
         let k = strength.min(1.0) as f32;
-        let c = [k; 4];
+        let l = k * light.clamp(0.0, 1.0) as f32;
+        let c = [l, l, l, k];
         let (x, y, w, h) = place;
         for (x0, y0, x1, y1) in area.iter().filter_map(|r| clip(r, place)) {
             let (u0, v0, u1, v1) = ((x0 - x) / w, (y0 - y) / h, (x1 - x) / w, (y1 - y) / h);

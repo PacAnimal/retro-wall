@@ -37,7 +37,7 @@ fn expected(theme: &str) -> (Header, Header) {
         // the hostname and the status line on the left; widgets and graph (it has none) on the right
         "copperworks" => (of(&[Piece::Title, Piece::Status]), of(&[Piece::Widgets, Piece::Graph])),
         // pure wallpapers: no header anywhere
-        "forest" | "matrix" | "racing" => (Header::NONE, Header::NONE),
+        "blocky" | "forest" | "matrix" | "racing" => (Header::NONE, Header::NONE),
         _ => (Header::NONE, Header::ALL),
     }
 }

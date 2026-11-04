@@ -18,7 +18,6 @@ use cairo::{Context, Extend, Filter, ImageSurface, Matrix, RadialGradient, Surfa
 use gl::types::{GLint, GLuint};
 use serde::Deserialize;
 use std::f64::consts::{FRAC_PI_4, TAU};
-use std::sync::OnceLock;
 use toml::Table;
 
 /// The water's mask, which the river's live part takes from the painting.
@@ -137,21 +136,6 @@ const MEANDER: f64 = 0.18;
 /// screen keeps its thickness: 1 or more.
 pub fn more(w: f64, h: f64, u: f64) -> f64 {
     (w * h / (u * u * 16.0 / 9.0)).max(1.0)
-}
-
-/// The seed of this run's forest, the same on every monitor.
-fn seed(set: i64) -> i64 {
-    static RUN: OnceLock<i64> = OnceLock::new();
-    if set != 0 {
-        return set;
-    }
-    *RUN.get_or_init(|| {
-        if crate::day::held() {
-            return 1;
-        }
-        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() as i64);
-        (t ^ (std::process::id() as i64) << 20).abs().max(1)
-    })
 }
 
 // --- the ground's axes -------------------------------------------------------------------------------
@@ -650,7 +634,7 @@ impl Part for Forest {
     fn paint(&mut self, g: &Geo, c: &Context, s: &mut Shared) {
         let (w, h, u) = (g.w as f64, g.h as f64, unit_on(g));
         let st = &self.st;
-        let mut rng = Rng::new(seed(st.seed));
+        let mut rng = Rng::new(crate::rng::run_seed(st.seed));
         let side = st.tile * u;
         let (mut ground, mut path, mut bed) = (load_png(g.th.path(&st.ground)), load_png(g.th.path(&st.path)), load_png(g.th.path(&st.bed)));
         for t in [&mut ground, &mut path, &mut bed] {
@@ -773,7 +757,7 @@ impl Part for Forest {
             let area = wet_area(&mut water, g.w, g.h);
             s.put(&WATER, Water { mask: water, area, flow });
         }
-        s.put(&STAND, Stand { sprites: pics.sprites, placed: standing, river, flow, crossings, flowers, burrows, seed: seed(st.seed) });
+        s.put(&STAND, Stand { sprites: pics.sprites, placed: standing, river, flow, crossings, flowers, burrows, seed: crate::rng::run_seed(st.seed) });
     }
 }
 
