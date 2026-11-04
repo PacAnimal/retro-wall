@@ -1,0 +1,90 @@
+# forest: a forest seen at an isometric angle, painted as an old isometric role-playing game's maps were,
+# laid out anew each time retro-wall starts: woods of oak, birch, pine, fir, beech, alder and willow in stands with clearings
+# between, undergrowth, stones and logs, dirt paths, and a river that flows, a bridge or stepping stones where
+# a path crosses it. No two copies of a picture stand close, nor at the same size near each other.
+#
+# It lives: the trees and the undergrowth bend in gusts, the clouds' shadows drift over, ducks paddle on
+# the river and a trout leaps now and then, crows fly over, butterflies keep to the flowers, rabbits come
+# out of their burrows, leaves fall and dust glints in the light. The pictures are beside this file: the ground,
+# path and river bed textures (seamless, seen from above) and the things in sprites/, each standing on
+# its foot at the bottom; trees of one species share the start of their names (oak1, oak-ancient).
+# [element.forest].seed = N keeps one forest.
+name = "Forest"
+
+scene = ["forest", "title", "instruments"]
+
+[monitors]                  # a pure wallpaper: nothing over the scene. title = "rightmost" in retro.toml
+title = "none"              # shows the hostname, in the lettering below
+widgets = "none"
+graph = "none"
+status = "none"
+
+[palette]                   # the forest's: its shade, its moss and its paths
+base = "#2c3418"
+shadow = "#1a200e"
+deep = "#3a2a14"
+ramp = ["#3c4a1c", "#56662a", "#7a8436", "#a89048", "#c8a868", "#e8d8a8"]
+title_top = "#f0e4bc"
+title_light = "#d8b878"
+title_bottom = "#8a6230"
+glow = "#c8a868"
+caption = "#e8d8a8"
+bracket = "#56662a"
+
+[tweaks]                    # the lettering over the canopy: a deep shadow of the wood's shade, so it reads
+title_corner = "top-right"
+title_glow = [[8, 0.3]]
+title_shadow = [4.0, 6.0, 4.0, 1.4, "#0a0e04"]
+rule = false
+ruler_end = 0.0
+
+[element.forest]
+type = "forest"
+density = 35.0              # trees per square unit where the wood is thickest
+brightness = 0.85           # every picture a little darker and duller than painted
+saturation = 0.85
+ground = "ground.png"
+path = "path.png"
+bed = "bed.png"
+trees = ["sprites/oak1.png", "sprites/oak2.png", "sprites/oak3.png", "sprites/oak4.png", "sprites/oak5.png", "sprites/oak6.png",
+	"sprites/oak-young.png", "sprites/oak-ancient.png", "sprites/oak-ancient2.png", "sprites/oak-ancient3.png",
+	"sprites/birch1.png", "sprites/birch2.png", "sprites/birch3.png", "sprites/birch4.png", "sprites/birch5.png",
+	"sprites/birch6.png", "sprites/birch-young.png", "sprites/pine1.png", "sprites/pine2.png", "sprites/pine3.png",
+	"sprites/pine4.png", "sprites/pine5.png", "sprites/pine6.png", "sprites/pine-tall.png", "sprites/pine-tall2.png",
+	"sprites/pine-tall3.png", "sprites/fir.png", "sprites/fir2.png", "sprites/fir3.png", "sprites/beech.png",
+	"sprites/beech2.png", "sprites/beech3.png", "sprites/alder.png", "sprites/alder2.png", "sprites/alder3.png",
+	"sprites/willow.png", "sprites/willow2.png", "sprites/willow3.png", "sprites/maple2.png", "sprites/maple3.png",
+	"sprites/sapling.png", "sprites/sapling2.png", "sprites/sapling3.png", "sprites/snag.png",
+	"sprites/fir4.png", "sprites/fir5.png", "sprites/fir6.png", "sprites/fir-twin.png", "sprites/pine7.png", "sprites/pine-bent.png", "sprites/larch.png", "sprites/snag2.png", "sprites/oak7.png", "sprites/birch7.png", "sprites/linden.png", "sprites/linden2.png", "sprites/maple4.png", "sprites/willow4.png", "sprites/oak-ancient4.png", "sprites/alder4.png", "sprites/beech4.png"]
+undergrowth = ["sprites/bush1.png", "sprites/bush2.png", "sprites/fern1.png", "sprites/fern2.png", "sprites/grass.png",
+	"sprites/brambles.png", "sprites/bilberry.png", "sprites/foxgloves.png", "sprites/grass-tall.png", "sprites/fern3.png",
+	"sprites/nettles.png",
+	"sprites/juniper.png"]
+stones = "sprites/stones.png"
+scattered = ["sprites/log.png", "sprites/stump.png", "sprites/boulder.png",
+	"sprites/stump2.png", "sprites/stump-hollow.png", "sprites/stump-mushrooms.png", "sprites/stump-broken.png", "sprites/stump-birch.png", "sprites/stump-cut.png", "sprites/stump-sprout.png", "sprites/stump-mossy.png", "sprites/stump-burnt.png"]
+rocks = ["sprites/outcrop.png", "sprites/slab.png", "sprites/cairn.png", "sprites/rocks-fern.png", "sprites/standing-stone.png",
+	"sprites/boulder-split.png", "sprites/pebbles.png", "sprites/river-rocks.png", "sprites/sandstone.png"]
+clutter = ["sprites/fly-agaric.png", "sprites/mushrooms.png", "sprites/burrow.png", "sprites/den.png", "sprites/anthill.png",
+	"sprites/branches.png", "sprites/pinecones.png", "sprites/log-end.png",
+	"sprites/burrow2.png", "sprites/burrow-roots.png", "sprites/burrow3.png", "sprites/burrow-earth.png", "sprites/den-rock.png", "sprites/burrow-grass.png", "sprites/burrow-leaves.png", "sprites/den-log.png", "sprites/burrow-fern.png"]
+camps = ["sprites/campfire.png",
+	"sprites/campfire-cold.png", "sprites/campfire-embers.png", "sprites/campfire-laid.png", "sprites/campfire-ring.png", "sprites/campfire-ash.png", "sprites/campfire-log.png", "sprites/campfire-pot.png", "sprites/campfire-lean.png", "sprites/campfire-pit.png", "sprites/campfire-lit.png", "sprites/campfire-kettle.png", "sprites/campfire-blaze.png", "sprites/campfire-cauldron.png", "sprites/campfire-lit2.png", "sprites/campfire-blaze2.png", "sprites/campfire-spit.png", "sprites/campfire-ringed.png", "sprites/campfire-sparks.png"]
+decals = ["sprites/leaves.png", "sprites/moss.png", "sprites/flowers.png", "sprites/clover.png", "sprites/puddle.png",
+	"sprites/twigs.png", "sprites/earth.png",
+	"sprites/stones-patch.png", "sprites/gravel.png", "sprites/slab-flat.png", "sprites/earth2.png", "sprites/leaves2.png", "sprites/moss2.png", "sprites/clover2.png", "sprites/gravel2.png", "sprites/twigs2.png"]
+tracks = ["sprites/tracks-deer.png", "sprites/tracks-paws.png"]
+banks = ["sprites/reeds.png", "sprites/cattails.png", "sprites/irises.png"]
+duck = "critters/duck.png"
+rabbit = "critters/rabbit.png"
+bird = "critters/crow.png"
+fish = "critters/trout.png"
+# each crossing's picture and the ends of its middle line on the ground, in its pixels, left then right:
+# it is set across the river to reach dry ground both ways, on the path's line
+bridges = [
+	{ image = "sprites/bridge.png", ends = [[280, 850], [1262, 290]] },
+	{ image = "sprites/bridge-logs.png", ends = [[100, 940], [1280, 260]] },
+	{ image = "sprites/bridge-stone.png", ends = [[225, 825], [1180, 316]] },
+	{ image = "sprites/stepping-stones.png", ends = [[150, 730], [1320, 80]] },
+]
+

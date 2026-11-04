@@ -53,6 +53,11 @@ fn copperworks() {
 }
 
 #[test]
+fn forest() {
+    draws("forest");
+}
+
+#[test]
 fn racing() {
     draws("racing");
 }
@@ -96,7 +101,7 @@ fn every_bundled_theme_has_a_test() {
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
     names.sort();
-    assert_eq!(names, ["aurora", "copperworks", "guybrush", "matrix", "neon_rain", "night_city", "phosphor", "racing", "winter"]);
+    assert_eq!(names, ["aurora", "copperworks", "forest", "guybrush", "matrix", "neon_rain", "night_city", "phosphor", "racing", "winter"]);
 }
 
 #[test]
