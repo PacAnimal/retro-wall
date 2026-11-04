@@ -1,9 +1,9 @@
 # retro-wall
 
 A live desktop wallpaper: a scene that moves (a synthwave horizon, a rainy neon city, an arctic night,
-the digital rain, a winter field, a pirate island, an engine of copper and steam, a road at sunset),
-with the machine's readings in it: meters, a tape deck that plays with the disks, the network's traffic
-as mountains, its status line.
+the digital rain, a winter field, a pirate island, an engine of copper and steam, a road at sunset, a
+forest with a river), with the machine's readings in it: meters, a tape deck that plays with the disks,
+the network's traffic as mountains, its status line.
 
 One Rust binary. It draws on the GPU (OpenGL 3.3, or 2.1 on older hardware), presents a frame only when
 something in it changed, and stops while the picture is covered or the machine is on battery.
@@ -61,9 +61,18 @@ Pick one with `--theme NAME`. Click a picture for a full-resolution still.
 <b>racing</b>: an old DOS racer that follows the clock
 <br><img src="screenshots/themes/racing-times.png" width="800" alt="racing at 07:00, 13:00, 18:30 and 23:00">
 </td></tr>
+<tr><td>
+<a href="screenshots/themes/forest.png"><img src="screenshots/themes/forest.gif" width="800" alt="forest"></a><br>
+<b>forest</b>: an isometric woodland, laid out anew each start
+<br><a href="screenshots/themes/forest-1.jpg"><img src="screenshots/themes/forest-1.jpg" width="396" alt="a forest layout"></a>
+<a href="screenshots/themes/forest-2.jpg"><img src="screenshots/themes/forest-2.jpg" width="396" alt="a second forest layout"></a>
+<br><a href="screenshots/themes/forest-3.jpg"><img src="screenshots/themes/forest-3.jpg" width="396" alt="a third forest layout"></a>
+<a href="screenshots/themes/forest-4.jpg"><img src="screenshots/themes/forest-4.jpg" width="396" alt="a fourth forest layout"></a>
+<br>Four layouts at 4K: click one for the full picture.
+</td></tr>
 </table>
 
-matrix and racing show only the scene by default. Set `[monitors]` in `retro.toml` to show the
+matrix, racing and forest show only the scene by default. Set `[monitors]` in `retro.toml` to show the
 hostname, instruments and graph, as here.
 
 Made a theme of your own? Share it: `retro-wall --new theme NAME` starts one, `EXTENDING.md` shows what
@@ -160,7 +169,7 @@ Options for the autostarted instance go in `~/.config/retro/retro-wall.conf`, on
 sources go in `~/.config/retro/retro.toml`.
 
 Themes: `phosphor` (the default), `neon_rain`, `night_city`, `aurora`, `winter`, `matrix`, `guybrush`,
-`copperworks`, `racing`.
+`copperworks`, `racing`, `forest`.
 
 ## Extending
 

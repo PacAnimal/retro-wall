@@ -3,6 +3,7 @@
 
 pub mod aurora;
 pub mod core;
+pub mod forest;
 pub mod guybrush;
 pub mod instruments;
 pub mod machine;
@@ -14,6 +15,7 @@ pub mod phosphor;
 pub mod racing;
 pub mod shader;
 pub mod winter;
+pub mod woods;
 
 use crate::config::{KindInfo, Theme};
 use crate::scene::{Edges, Geo, Header, Part, Pass};
@@ -88,6 +90,7 @@ fn registry() -> &'static [(Kind, Table)] {
         v.extend(winter::kinds());
         v.extend(matrix::kinds());
         v.extend(racing::kinds());
+        v.extend(forest::kinds());
         v.into_iter()
             .map(|k| {
                 let defaults = k.defaults.parse::<Table>().unwrap_or_else(|e| unreachable!("kind {}'s defaults: {e}", k.name));
