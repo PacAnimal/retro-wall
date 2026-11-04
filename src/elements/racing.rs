@@ -359,6 +359,7 @@ struct Settings {
     ground_day: [Colour; 2],
     ground_night: [Colour; 2],
     road: [Colour; 4],
+    light_day: Colour,
     light_dusk: Colour,
     light_night: Colour,
     headlights: Colour,
@@ -666,9 +667,9 @@ impl Racing {
         SkyLook { stops, glow, strength: 0.25 * l.day + 0.9 * l.dusk, band: 0.55 * l.dusk }
     }
 
-    /// The scene's light on what stands in it: white by day, warm at dusk, dark blue at night.
+    /// The scene's light on what stands in it: daylight by day, warm at dusk, dark blue at night.
     fn tint(&self, l: &Light) -> Rgb {
-        let night = mixed(self.s.light_night.rgb(), (1.0, 1.0, 1.0), l.day);
+        let night = mixed(self.s.light_night.rgb(), self.s.light_day.rgb(), l.day);
         mixed(night, self.s.light_dusk.rgb(), l.dusk * l.day.max(0.35) * 0.9)
     }
 
@@ -684,8 +685,8 @@ impl Racing {
     }
 
     fn sun_size(l: &Light) -> f64 {
-        // larger, and redder, low in the sky
-        150.0 + 90.0 * smoothstep(0.5, 0.0, l.elevation.abs())
+        // larger, and redder, low in the sky; small and white high in it
+        105.0 + 135.0 * smoothstep(0.5, 0.0, l.elevation.abs())
     }
 
     /// The sprites behind the road: stars, the sun's halo, the sun, the moon, clouds and hills; all
@@ -712,6 +713,15 @@ impl Racing {
             out.push(p);
             let tint = mixed((1.0, 1.0, 1.0), (1.0, 0.72, 0.62), low);
             out.push(self.place(SUN, (x - size / 2.0, y - size / 2.0, x + size / 2.0, y + size / 2.0), tint, 1.0));
+            // high in the sky, a white glare over it: the sunset's colours are only the low sun's
+            let high = smoothstep(0.15, 0.6, l.elevation);
+            if high > 0.01 {
+                for r in [size * 1.5, size * 0.9] {
+                    let mut p = self.place(GLOW, (x - r, y - r, x + r, y + r), (1.0, 0.99, 0.94), high);
+                    p.mode = Mode::Light(Blend::Screen);
+                    out.push(p);
+                }
+            }
         }
         // the moon, by night
         if (-0.08..=1.08).contains(&l.moon) && l.day < 0.6 {
@@ -746,10 +756,11 @@ impl Racing {
                 out.push(p);
             }
         }
-        // clouds drifting, lit from below at dawn and dusk, dark at night
+        // clouds drifting: grey beneath by day, lit from below at dawn and dusk, dark at night
         if n > 0 {
-            let top = mixed(mixed((0.1, 0.11, 0.18), (1.0, 1.0, 1.0), l.day), mixed(sky.stops[1], (1.0, 0.85, 0.85), 0.5), l.dusk * 0.7);
-            let under = mixed(top, sky.glow, l.dusk * 0.85);
+            let top = mixed(mixed((0.1, 0.11, 0.18), (0.95, 0.95, 0.94), l.day), mixed(sky.stops[1], (1.0, 0.85, 0.85), 0.5), l.dusk * 0.7);
+            let shaded = mixed(top, (0.6, 0.66, 0.76), 0.55 * l.day * (1.0 - l.dusk));
+            let under = mixed(shaded, sky.glow, l.dusk * 0.85);
             for i in 0..5 {
                 let sprite = self.clouds.start + (hash(self.seed, i, 51) * n as f64) as usize % n;
                 let (w0, h0) = self.sprites[sprite].size;
@@ -1966,7 +1977,7 @@ trees_density = 0.55
 pole_spacing = 18.0
 pixels = 240.0
 colours = 32.0
-sky_day = ["#4f86a8", "#86b4c4", "#c9decc"]
+sky_day = ["#3b6a96", "#7299b8", "#b4c8cf"]
 sky_dawn = ["#2e3a72", "#c47a9c", "#ffd0a0"]
 sky_dusk = ["#2a1c52", "#b8467a", "#ff9a5c"]
 sky_night = ["#02030a", "#060a18", "#10162c"]
@@ -1975,9 +1986,10 @@ glow_dusk = "#ff8a4c"
 hills_day = ["#637588", "#7a8c98"]
 hills_dusk = ["#4a3a6e", "#7a5a86"]
 hills_night = ["#0a0e1c", "#0e1424"]
-ground_day = ["#468779", "#52947f"]
+ground_day = ["#4a6339", "#566f40"]
 ground_night = ["#0e1a20", "#112026"]
 road = ["#535366", "#dc6262", "#fff0cd", "#f6e3bd"]
+light_day = "#e6e2d6"
 light_dusk = "#ffb48a"
 light_night = "#141a30"
 headlights = "#fff0c8"
