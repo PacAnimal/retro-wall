@@ -119,6 +119,12 @@ pub trait Display {
     /// A wallpaper window at (x, y), w by h: below every other window, on every workspace, off the
     /// taskbar, letting clicks through. Its GL context is current on return.
     fn window(&mut self, x: i32, y: i32, w: i32, h: i32) -> Result<WindowId, String>;
+    /// A wallpaper window as `window` makes, that shows `rgba` (w x h, RGBA, rows top down) and nothing
+    /// else, and draws it again itself whenever it is exposed: where the OpenGL is too old for `window`.
+    /// Which context is current does not change. Close it with `close`.
+    fn still_window(&mut self, _x: i32, _y: i32, _w: i32, _h: i32, _rgba: &[u8]) -> Result<WindowId, String> {
+        Err("no still window on this platform".into())
+    }
     /// Whether the window's context is OpenGL 3.3 core (else 2.1).
     fn core(&self, w: WindowId) -> bool;
     fn make_current(&mut self, w: WindowId);

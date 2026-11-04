@@ -68,6 +68,10 @@ A theme's `shader` element is written once in GLSL 1.20 and runs on both profile
   (`TaskbarCreated`) makes the windows again; each keeps its GL context, so nothing is uploaded again.
 - **WGL**: 3.3 core through `WGL_ARB_create_context`, else a legacy context of 2.1 or more. Swap interval 0:
   DWM composes.
+- **Older than 2.1** (Windows' own GDI Generic, OpenGL 1.1, all a remote session without a GPU gets): no
+  live window. `Display::still_window` shows the still picture over the whole monitor, its header the
+  hostname only (frozen instruments would show untrue readings), drawn with
+  `glDrawPixels` (OpenGL 1.0) and drawn again by the platform on every expose. It never animates.
 - **Per-monitor DPI aware (v2)**: monitors and windows in physical pixels.
 - **The font**: cairo's toy font API on Windows finds families through DirectWrite's system collection
   only, which never holds a font added at run time (`AddFontResourceEx`, private or not). So
