@@ -15,8 +15,8 @@ use std::sync::Arc;
 /// Two monitors side by side, of different sizes, the left one lower: as in the live tests.
 fn pair() -> [Screen; 2] {
     [
-        Screen { name: "DUMMY0".into(), x: 0, y: 60, w: 800, h: 450, primary: false },
-        Screen { name: "DUMMY1".into(), x: 800, y: 0, w: 960, h: 540, primary: true },
+        Screen { name: "DUMMY0".into(), x: 0, y: 60, w: 800, h: 450, primary: false, dpi: 96, mm: (0, 0) },
+        Screen { name: "DUMMY1".into(), x: 800, y: 0, w: 960, h: 540, primary: true, dpi: 96, mm: (0, 0) },
     ]
 }
 
@@ -37,7 +37,7 @@ fn expected(theme: &str) -> (Header, Header) {
         // the hostname and the status line on the left; widgets and graph (it has none) on the right
         "copperworks" => (of(&[Piece::Title, Piece::Status]), of(&[Piece::Widgets, Piece::Graph])),
         // pure wallpapers: no header anywhere
-        "matrix" | "racing" => (Header::NONE, Header::NONE),
+        "forest" | "matrix" | "racing" => (Header::NONE, Header::NONE),
         _ => (Header::NONE, Header::ALL),
     }
 }
@@ -69,14 +69,18 @@ fn each_bundled_theme_places_its_header() {
         let got = (live::header(m, "DUMMY0", &all, false), live::header(m, "DUMMY1", &all, false));
         assert_eq!(got, expected(name), "{name}: (left, right)");
         // a third monitor between them shows none of it
-        let three = [all[0].clone(), Screen { name: "MID".into(), x: 800, y: 0, w: 640, h: 480, primary: false }, Screen { x: 1440, ..all[1].clone() }];
+        let three = [
+            all[0].clone(),
+            Screen { name: "MID".into(), x: 800, y: 0, w: 640, h: 480, primary: false, dpi: 96, mm: (0, 0) },
+            Screen { x: 1440, ..all[1].clone() },
+        ];
         assert_eq!(live::header(m, "MID", &three, false), Header::NONE, "{name}: the middle of three");
         assert_eq!(live::header(m, "DUMMY0", &three, false), got.0, "{name}: the left of three");
         assert_eq!(live::header(m, "DUMMY1", &three, false), got.1, "{name}: the right of three");
         // stacked: both leftmost and rightmost is the upper one, which shows both sides' pieces
         let stacked = [
-            Screen { name: "TOP".into(), x: 0, y: 0, w: 1920, h: 1080, primary: false },
-            Screen { name: "LOW".into(), x: 0, y: 1080, w: 1920, h: 1080, primary: false },
+            Screen { name: "TOP".into(), x: 0, y: 0, w: 1920, h: 1080, primary: false, dpi: 96, mm: (0, 0) },
+            Screen { name: "LOW".into(), x: 0, y: 1080, w: 1920, h: 1080, primary: false, dpi: 96, mm: (0, 0) },
         ];
         assert_eq!(live::header(m, "TOP", &stacked, false), union(got.0, got.1), "{name}: the upper of two stacked");
         assert_eq!(live::header(m, "LOW", &stacked, false), Header::NONE, "{name}: the lower of two stacked");
@@ -89,10 +93,14 @@ fn each_bundled_theme_places_its_header() {
 #[test]
 fn a_theme_can_keep_pieces_on_every_monitor() {
     let pair = pair();
-    let three = [pair[0].clone(), Screen { name: "MID".into(), x: 800, y: 0, w: 640, h: 480, primary: false }, Screen { x: 1440, ..pair[1].clone() }];
+    let three = [
+        pair[0].clone(),
+        Screen { name: "MID".into(), x: 800, y: 0, w: 640, h: 480, primary: false, dpi: 96, mm: (0, 0) },
+        Screen { x: 1440, ..pair[1].clone() },
+    ];
     let stacked = [
-        Screen { name: "TOP".into(), x: 0, y: 0, w: 1920, h: 1080, primary: false },
-        Screen { name: "LOW".into(), x: 0, y: 1080, w: 1920, h: 1080, primary: false },
+        Screen { name: "TOP".into(), x: 0, y: 0, w: 1920, h: 1080, primary: false, dpi: 96, mm: (0, 0) },
+        Screen { name: "LOW".into(), x: 0, y: 1080, w: 1920, h: 1080, primary: false, dpi: 96, mm: (0, 0) },
     ];
     let all = "[monitors]\ntitle = \"all\"\nwidgets = \"all\"\ngraph = \"all\"\nstatus = \"all\"\n";
     for base in bundled_themes() {

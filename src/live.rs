@@ -105,7 +105,7 @@ impl Monitor {
         w: &mut World,
         still: Option<&cairo::Context>,
     ) -> Result<Monitor, String> {
-        let geo = Geo::new(s.w, s.h, host, edges, header, Some(s.name.clone()), th);
+        let geo = Geo { px_per_mm: s.px_per_mm(), ..Geo::new(s.w, s.h, host, edges, header, Some(s.name.clone()), th) };
         let t0 = Instant::now();
         let mut scene = Scene::new(geo.clone());
         if let Some(c) = still {
@@ -969,7 +969,7 @@ pub fn wallpapers(loaded: &Loaded, o: &Options) {
     let lead = lead(&want);
     for (s, header, edges) in want {
         if desktop.per_monitor() || lead.as_deref() == Some(s.name.as_str()) {
-            let g = Geo::new(s.w, s.h, &o.host, edges, header, Some(s.name.clone()), th.clone());
+            let g = Geo { px_per_mm: s.px_per_mm(), ..Geo::new(s.w, s.h, &o.host, edges, header, Some(s.name.clone()), th.clone()) };
             match crate::still::draw(&g) {
                 Ok(mut pic) => crate::still::set_wallpaper(&th, desktop.as_ref(), &s, &mut pic),
                 Err(e) => crate::errln!("{}: {e}", s.name),

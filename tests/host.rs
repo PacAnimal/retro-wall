@@ -22,7 +22,7 @@ fn args(s: &str) -> Vec<String> {
 }
 
 fn screen(name: &str, x: i32, y: i32, primary: bool) -> Screen {
-    Screen { name: name.into(), x, y, w: 1920, h: 1080, primary }
+    Screen { name: name.into(), x, y, w: 1920, h: 1080, primary, dpi: 96, mm: (0, 0) }
 }
 
 /// The binary, with the bundled themes and no display; (exit code, standard error).
@@ -80,6 +80,11 @@ fn command_lines() {
     assert_eq!((c, a.frames, a.fps), (Command::Snapshot("x.png".into()), Some(5), 25.0));
     assert_eq!(cli::parse(&args("--snapshot x.png --frames 5")).unwrap().1.fps, 30.0);
     assert_eq!(cli::parse(&args("--snapshot x.png")).unwrap().1.frames, None);
+    // a monitor's own size where it is believable; the desktop's DPI where not
+    let px = |w, h, mm, dpi| Screen { name: "M".into(), x: 0, y: 0, w, h, primary: true, dpi, mm }.px_per_mm();
+    assert!((px(2560, 1440, (597, 336), 96) - 1440.0 / 336.0).abs() < 1e-9);
+    assert!((px(1920, 1080, (160, 90), 96) - 96.0 / 25.4).abs() < 1e-9, "a television's nominal size");
+    assert!((px(1920, 1080, (0, 0), 192) - 192.0 / 25.4).abs() < 1e-9, "no size: the desktop's DPI");
     assert_eq!(live::frame_file("out.png", 7), "out-0007.png");
     assert_eq!(live::frame_file("/tmp/a/f.png", 12), "/tmp/a/f-0012.png");
     assert_eq!(live::frame_file("frames", 0), "frames-0000");

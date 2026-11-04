@@ -39,7 +39,7 @@ use windows_sys::Win32::System::Power::{POWERBROADCAST_SETTING, RegisterPowerSet
 use windows_sys::Win32::System::RemoteDesktop::{NOTIFY_FOR_THIS_SESSION, ProcessIdToSessionId, WTSRegisterSessionNotification};
 use windows_sys::Win32::System::SystemServices::GUID_CONSOLE_DISPLAY_STATE;
 use windows_sys::Win32::System::Threading::GetCurrentProcessId;
-use windows_sys::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext};
+use windows_sys::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForMonitor, MDT_EFFECTIVE_DPI, SetProcessDpiAwarenessContext};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 thread_local! {
@@ -492,9 +492,13 @@ impl crate::platform::Display for Win {
     fn screens(&self) -> Vec<Screen> {
         monitors()
             .into_iter()
-            .map(|(_, m)| {
+            .map(|(h, m)| {
                 let r = m.monitorInfo.rcMonitor;
                 let name = super::unwide(&m.szDevice);
+                // the scale the user set for it, as DPI (96 at 100%)
+                let (mut dx, mut dy) = (96u32, 96u32);
+                // SAFETY: a monitor handle the enumeration gave; two out-parameters.
+                let dpi = if unsafe { GetDpiForMonitor(h, MDT_EFFECTIVE_DPI, &mut dx, &mut dy) } == 0 { dx } else { 96 };
                 Screen {
                     name: name.trim_start_matches(r"\\.\").to_string(),
                     x: r.left,
@@ -502,6 +506,8 @@ impl crate::platform::Display for Win {
                     w: r.right - r.left,
                     h: r.bottom - r.top,
                     primary: m.monitorInfo.dwFlags & MONITORINFOF_PRIMARY != 0,
+                    dpi,
+                    mm: (0, 0),
                 }
             })
             .collect()

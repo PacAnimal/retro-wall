@@ -60,6 +60,8 @@ pub fn places(mtm: MainThreadMarker) -> Vec<Place> {
                 w: (points.2 * k).round() as i32,
                 h: (points.3 * k).round() as i32,
                 primary: i == 0,
+                dpi: (96.0 * k).round() as u32,
+                mm: (0, 0),
             };
             Place { screen, native: s, points, scale: k }
         })
