@@ -33,15 +33,26 @@ fn whoami() -> u32 {
 pub fn materialise(dir: &Path, name: &str, bytes: &[u8]) -> Result<PathBuf, String> {
     let (stem, ext) = name.rsplit_once('.').unwrap_or((name, "ttf"));
     let path = dir.join(format!("{stem}-{:08x}.{ext}", crate::svg::fnv(bytes) as u32));
-    if path.metadata().is_ok_and(|m| m.len() == bytes.len() as u64) {
-        return Ok(path);
+    match path.metadata() {
+        Ok(m) if m.len() == bytes.len() as u64 => return Ok(path),
+        // cut short by an earlier start that was stopped: written again below
+        Ok(_) => {
+            let _ = std::fs::remove_file(&path);
+        }
+        Err(_) => {}
     }
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let part = path.with_extension(format!("{}.part", std::process::id()));
-    std::fs::write(&part, bytes).and_then(|_| std::fs::rename(&part, &path)).map_err(|e| {
-        let _ = std::fs::remove_file(&part);
-        format!("{}: {e}", path.display())
-    })?;
+    // put in place only where none is yet: one put there by another start (the same bytes) is kept, not
+    // replaced, as the system may be taking it in that moment (CoreText crashes when its file is
+    // swapped under it). Where links cannot be made, renamed into place
+    let placed = std::fs::write(&part, bytes).and_then(|_| match std::fs::hard_link(&part, &path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(_) => std::fs::rename(&part, &path),
+    });
+    let _ = std::fs::remove_file(&part);
+    placed.map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(path)
 }
 
@@ -70,6 +81,23 @@ pub fn registered() -> Vec<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    /// A face already in place is kept as it is, never replaced; one cut short is written again.
+    #[test]
+    fn a_face_in_place_is_kept_and_a_short_one_written_again() {
+        let dir = std::env::temp_dir().join(format!("retro-wall-font-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let p = super::materialise(&dir, "f.ttf", b"twelve bytes").unwrap();
+        let first = std::fs::metadata(&p).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        assert_eq!(super::materialise(&dir, "f.ttf", b"twelve bytes").unwrap(), p);
+        assert_eq!(std::fs::metadata(&p).unwrap().modified().unwrap(), first, "replaced");
+        std::fs::write(&p, b"twelve").unwrap();
+        super::materialise(&dir, "f.ttf", b"twelve bytes").unwrap();
+        assert_eq!(std::fs::read(&p).unwrap(), b"twelve bytes");
+        assert!(std::fs::read_dir(&dir).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().ends_with(".part")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn the_family_name_has_no_nul() {
         // cairo-rs panics on one (util::select_mono passes it as it is)
