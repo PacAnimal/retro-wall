@@ -83,12 +83,14 @@ pub struct Geo {
     pub monitor: Option<String>,
     /// The look it is drawn in.
     pub th: Arc<Theme>,
+    /// The monitor's pixels per millimetre (Screen::px_per_mm).
+    pub px_per_mm: f64,
 }
 
 impl Geo {
     /// A monitor's picture in the look `th`, supersampled as it says.
     pub fn new(w: i32, h: i32, host: &str, edges: Edges, header: Header, monitor: Option<String>, th: Arc<Theme>) -> Geo {
-        Geo { w, h, host: host.to_string(), edges, scale: th.tw.supersample as i32, header, monitor, th }
+        Geo { w, h, host: host.to_string(), edges, scale: th.tw.supersample as i32, header, monitor, th, px_per_mm: 96.0 / 25.4 }
     }
 }
 

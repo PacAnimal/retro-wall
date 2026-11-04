@@ -512,7 +512,7 @@ pub fn preview(th: Arc<Theme>, path: &str, w: i32, h: i32, host: &str, header: b
         std::process::exit(2)
     });
     let header = if header { Header::ALL } else { Header::NONE };
-    let screen = Screen { name: String::new(), x: 0, y: 0, w, h, primary: true };
+    let screen = Screen { name: String::new(), x: 0, y: 0, w, h, primary: true, dpi: 96, mm: (0, 0) };
     let g = Geo::new(w, h, host, reserve.apply(&screen, Edges::NONE), header, None, th);
     let written = crate::still::draw(&g).and_then(|pic| pic.write_to_png(&mut file).map_err(|e| e.to_string()));
     if let Err(e) = written {
@@ -632,7 +632,7 @@ mod tests {
         assert!(r.add("middle", "1").is_err());
         assert!(r.add("top", "-1").is_err());
         assert!(r.add("top", "DP-1=").is_err());
-        let s = Screen { name: "DP-1".into(), x: 0, y: 0, w: 100, h: 50, primary: true };
+        let s = Screen { name: "DP-1".into(), x: 0, y: 0, w: 100, h: 50, primary: true, dpi: 96, mm: (0, 0) };
         let e = r.apply(&s, Edges { top: 1, right: 2, bottom: 3, left: 4 });
         assert_eq!((e.top, e.right, e.bottom, e.left), (30, 2, 3, 40));
     }

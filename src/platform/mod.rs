@@ -46,6 +46,24 @@ pub struct Screen {
     pub w: i32,
     pub h: i32,
     pub primary: bool,
+    /// The dots per inch the desktop draws it at: 96 on an ordinary screen, 192 on one with twice the
+    /// pixels for the same size (a retina screen).
+    pub dpi: u32,
+    /// Its size in millimetres, as the monitor reports it; 0 where it is not known.
+    pub mm: (u32, u32),
+}
+
+impl Screen {
+    /// Its pixels per millimetre: from its size where that is known and believable (50 to 500 DPI, the
+    /// same across as down, and wider than a 7-inch panel: televisions and projectors report only their
+    /// shape, 160 x 90), else from the DPI the desktop draws at.
+    pub fn px_per_mm(&self) -> f64 {
+        let measured = (self.mm.0 >= 170 && self.mm.1 > 0)
+            .then(|| (self.w as f64 / self.mm.0 as f64, self.h as f64 / self.mm.1 as f64))
+            .filter(|(across, down)| (across / down - 1.0).abs() < 0.1 && (50.0..=500.0).contains(&(down * 25.4)))
+            .map(|(_, down)| down);
+        measured.unwrap_or(self.dpi.clamp(48, 480) as f64 / 25.4)
+    }
 }
 
 /// Pixels along a monitor's sides kept by the desktop (panels, a taskbar).

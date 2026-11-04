@@ -412,6 +412,21 @@ impl X {
     }
 }
 
+impl X {
+    /// The DPI the desktop draws at, one for all monitors: `Xft.dpi` in the X resources (what XFCE,
+    /// GNOME and KDE set for a scaled desktop), or GDK_SCALE times 96; 96 if neither says.
+    fn desktop_dpi(&self) -> u32 {
+        // SAFETY: an open display; the string, if any, belongs to Xlib and is read before the next call.
+        let resources = unsafe {
+            let p = (self.xl.XResourceManagerString)(self.dpy);
+            if p.is_null() { String::new() } else { CStr::from_ptr(p).to_string_lossy().into_owned() }
+        };
+        let xft = resources.lines().find_map(|l| l.strip_prefix("Xft.dpi:")).and_then(|v| v.trim().parse::<f64>().ok());
+        let gdk = std::env::var("GDK_SCALE").ok().and_then(|v| v.trim().parse::<f64>().ok()).map(|k| k * 96.0);
+        xft.into_iter().chain(gdk).fold(96.0f64, f64::max).round().clamp(96.0, 384.0) as u32
+    }
+}
+
 impl crate::platform::Display for X {
     /// The monitors, by their RandR names.
     fn screens(&self) -> Vec<Screen> {
@@ -436,6 +451,8 @@ impl crate::platform::Display for X {
                     w: mi.width,
                     h: mi.height,
                     primary: mi.primary != 0,
+                    dpi: self.desktop_dpi(),
+                    mm: (mi.mwidth.max(0) as u32, mi.mheight.max(0) as u32),
                 });
                 (self.xl.XFree)(name as *mut _);
             }
