@@ -64,10 +64,10 @@ Pick one with `--theme NAME`. Click a picture for a full-resolution still.
 <tr><td>
 <a href="screenshots/themes/forest.png"><img src="screenshots/themes/forest.gif" width="800" alt="forest"></a><br>
 <b>forest</b>: an isometric woodland, laid out anew each start
-<br><a href="screenshots/themes/forest-1.jpg"><img src="screenshots/themes/forest-1.jpg" width="396" alt="a forest layout"></a>
-<a href="screenshots/themes/forest-2.jpg"><img src="screenshots/themes/forest-2.jpg" width="396" alt="a second forest layout"></a>
-<br><a href="screenshots/themes/forest-3.jpg"><img src="screenshots/themes/forest-3.jpg" width="396" alt="a third forest layout"></a>
-<a href="screenshots/themes/forest-4.jpg"><img src="screenshots/themes/forest-4.jpg" width="396" alt="a fourth forest layout"></a>
+<br><a href="screenshots/themes/forest-1.jpg"><img src="screenshots/themes/forest-1.jpg" width="196" alt="a forest layout"></a>
+<a href="screenshots/themes/forest-2.jpg"><img src="screenshots/themes/forest-2.jpg" width="196" alt="a second forest layout"></a>
+<a href="screenshots/themes/forest-3.jpg"><img src="screenshots/themes/forest-3.jpg" width="196" alt="a third forest layout"></a>
+<a href="screenshots/themes/forest-4.jpg"><img src="screenshots/themes/forest-4.jpg" width="196" alt="a fourth forest layout"></a>
 <br>Four layouts at 4K: click one for the full picture.
 </td></tr>
 </table>
