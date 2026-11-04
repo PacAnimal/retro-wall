@@ -1,6 +1,22 @@
 //! The scenes' random numbers: xoshiro256++, seeded through SplitMix64. Each element has its own
 //! generator seeded from its settings, so a scene is the same on every start and every machine.
 
+/// The seed of this run's scene, the same on every monitor: `set`, or with none (0) one new each start,
+/// or 1 while the time of day is held (a snapshot's).
+pub fn run_seed(set: i64) -> i64 {
+    static RUN: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
+    if set != 0 {
+        return set;
+    }
+    *RUN.get_or_init(|| {
+        if crate::day::held() {
+            return 1;
+        }
+        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() as i64);
+        (t ^ (std::process::id() as i64) << 20).abs().max(1)
+    })
+}
+
 pub struct Rng {
     s: [u64; 4],
     spare: Option<f64>,

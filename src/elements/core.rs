@@ -497,6 +497,9 @@ impl Part for Caption {
     fn shows(&self) -> Header {
         Header::of(Piece::Title)
     }
+    fn dims(&self) -> bool {
+        true
+    }
     fn still(&self) -> bool {
         true
     }
@@ -520,6 +523,9 @@ pub struct Solid;
 impl Part for Solid {
     fn shows(&self) -> Header {
         Header::of(Piece::Title)
+    }
+    fn dims(&self) -> bool {
+        true
     }
     fn still(&self) -> bool {
         true

@@ -1,0 +1,48 @@
+# blocky: a block game's world as a player would screenshot it, flying over the hill above their farm:
+# timber houses about a well, fields of wheat, carrots, potatoes and beetroot, pens of sheep, cows and
+# pigs with a water trough, chickens and a cat about the yards, villagers at work, a stream round the
+# fields to a duck pond (fish in it), crossed by the paths on planks, a campfire with benches, and
+# beyond the river a mine in a knoll, its mouth lit; woods and mountains all about. It is drawn once
+# by a renderer of its own, block by block, every face's picture 16 x 16 pixel art made here, with the
+# sun's shadows baked for its places along its arc; then each frame the time of day lights it: the sun
+# and moon cross the sky, the shadows turn with them, the light goes golden low down, dawn and dusk
+# glow, the stars come out, and at night the torches and lanterns light the farm, wavering a little.
+# The `day` tweak is the hours the sun is up; --demo HH:mm holds the time.
+#
+# The interface's hearts are the processor's idle, the food the free memory, the experience bar the
+# disk's work and its level how full the disk is, each the mean of the last minute (`average`, in
+# seconds). `ui = false` hides the interface; `hand = true` shows the viewer's hand, at the lower right.
+name = "Blocky"
+
+scene = ["world", "title", "instruments"]
+
+[monitors]                  # a pure wallpaper: nothing over the scene. title = "rightmost" in retro.toml
+title = "none"              # shows the hostname, in the lettering below
+widgets = "none"
+graph = "none"
+status = "none"
+
+[palette]                   # the game's: grass, dirt, stone and its sky
+base = "#79a6ff"
+shadow = "#1d2a14"
+deep = "#3b2a1a"
+ramp = ["#2f4a1c", "#4f7d2a", "#79553a", "#7f7f7f", "#c3d9ff", "#ffffff"]
+title_top = "#ffffff"
+title_light = "#e0e0e0"
+title_bottom = "#a0a0a0"
+glow = "#c3d9ff"
+caption = "#ffffff"
+bracket = "#3f3f3f"
+
+[tweaks]
+day = [6.5, 19.5]           # the hours the sun is up
+title_corner = "top-right"
+title_glow = [[8, 0.2]]
+title_shadow = [4.0, 4.0, 0.0, 1.0, "#3f3f3f"]
+rule = false
+ruler_end = 0.0
+
+[element.world]
+type = "blocky"
+hand = false                # the viewer's empty hand at the lower right
+ui = true                   # the interface: hotbar, hearts, food and experience

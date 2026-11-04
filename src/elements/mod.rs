@@ -2,6 +2,7 @@
 //! a typed struct, and builds its parts for a monitor. A theme names it: `[element.NAME] type = "KIND"`.
 
 pub mod aurora;
+pub mod blocky;
 pub mod core;
 pub mod forest;
 pub mod guybrush;
@@ -91,6 +92,7 @@ fn registry() -> &'static [(Kind, Table)] {
         v.extend(matrix::kinds());
         v.extend(racing::kinds());
         v.extend(forest::kinds());
+        v.extend(blocky::kinds());
         v.into_iter()
             .map(|k| {
                 let defaults = k.defaults.parse::<Table>().unwrap_or_else(|e| unreachable!("kind {}'s defaults: {e}", k.name));
