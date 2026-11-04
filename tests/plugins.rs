@@ -19,11 +19,15 @@ use std::time::{Duration, Instant};
 
 type Readings = Arc<Mutex<HashMap<String, Reading>>>;
 
+/// A script, made by a child process: a file this process opened for writing could be held open in a
+/// child that another test forks at the same moment, and running it would then fail ("text file
+/// busy"). The body goes into a file of its own, never run, and install writes the script.
 fn executable(dir: &Path, name: &str, body: &str) -> PathBuf {
-    use std::os::unix::fs::PermissionsExt;
     let p = dir.join(name);
-    std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
-    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let text = dir.join(format!("{name}.text"));
+    std::fs::write(&text, format!("#!/bin/sh\n{body}\n")).unwrap();
+    let made = std::process::Command::new("install").arg("-m").arg("755").arg(&text).arg(&p).status().unwrap();
+    assert!(made.success(), "install {}", p.display());
     p
 }
 
