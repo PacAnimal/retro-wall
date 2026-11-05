@@ -202,7 +202,9 @@ jobs:
         run: |
           # a GUI program: PowerShell waits for it, and sees its output, only through Start-Process
           $out = Join-Path $env:RUNNER_TEMP version.txt
-          $p = Start-Process -FilePath .\retro-wall.exe -ArgumentList --version -Wait -PassThru -NoNewWindow -RedirectStandardOutput $out
+          $err = Join-Path $env:RUNNER_TEMP version-err.txt
+          # both redirected: with one alone it writes to its log, in the directory an install goes to
+          $p = Start-Process -FilePath .\retro-wall.exe -ArgumentList --version -Wait -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
           if ($p.ExitCode -ne 0) { throw "retro-wall.exe --version failed: $($p.ExitCode)" }
           $v = (Get-Content $out -Raw).Trim()
           Write-Output $v
