@@ -177,10 +177,18 @@ jobs:
       - name: The tests build for Windows too (they run on Linux and macOS)
         run: ci/windows/cargo test --release --no-run
       - run: ci/windows/cargo clippy --release --all-targets -- -D warnings
+      - name: The setup program, with the wall and its themes carried in it (pack-setup runs here, on Linux)
+        run: |
+          grep -q '8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a' target/x86_64-pc-windows-gnu/release/retro-wall-setup.exe
+          sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends libcairo2-dev
+          sudo chown -R "$(id -u)" target
+          mkdir -p dist && cp target/x86_64-pc-windows-gnu/release/retro-wall.exe dist/
+          cargo run --release --example pack-setup -- target/x86_64-pc-windows-gnu/release/retro-wall-setup.exe \
+            target/x86_64-pc-windows-gnu/release/retro-wall.exe themes dist/retro-wall-setup.exe
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-exe
-          path: target/x86_64-pc-windows-gnu/release/retro-wall.exe
+          path: dist/
 
   windows-run:
     needs: windows-build
@@ -225,3 +233,14 @@ jobs:
           $os = $xml.assembly.compatibility.application.supportedOS.Id
           Write-Output "supportedOS: $($os -join ' ')"
           if ($os -notcontains '{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}') { throw "the manifest does not name Windows 10 and 11" }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: src
+      - name: The setup program installs, changes, updates and uninstalls; and its window
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File src\windows\test-setup.ps1 -Setup retro-wall-setup.exe -Out setup-results
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: setup-results
+          path: setup-results

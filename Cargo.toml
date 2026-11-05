@@ -14,6 +14,7 @@ categories = ["gui", "graphics", "rendering"]
 cairo-rs = { version = "0.21", default-features = false, features = ["png"] }
 gl = "0.14"
 toml = "1"
+toml_edit = "0.23"
 serde = { version = "1", features = ["derive"] }
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 serde_json = "1"
@@ -43,8 +44,10 @@ windows-sys = { version = "0.61", features = [
     "Win32_NetworkManagement_Ndis",
     "Win32_Networking_WinSock",
     "Win32_Security",
+    "Win32_Security_Authentication_Identity",
     "Win32_Storage_FileSystem",
     "Win32_System_Console",
+    "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_IO",
     "Win32_System_JobObjects",
     "Win32_System_Ioctl",
@@ -55,7 +58,11 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_SystemInformation",
     "Win32_System_SystemServices",
     "Win32_System_Threading",
+    "Win32_System_Time",
+    "Win32_UI_Controls",
     "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
 
@@ -73,6 +80,10 @@ debug = "line-tables-only"
 strip = "none"
 
 # Development tools, not installed: cargo run --release --example NAME -- ARGS
+[[example]]
+name = "pack-setup"
+path = "tools/pack-setup.rs"
+
 [[example]]
 name = "pngdiff"
 path = "tools/pngdiff.rs"

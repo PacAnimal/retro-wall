@@ -690,7 +690,7 @@ pub fn run(loaded: &Loaded, o: Options) {
                         }
                         Err(err) => match open_still(&mut d, &s, &th, h, e, &o, desktop.as_deref(), is_lead) {
                             Ok(m) => {
-                                crate::outln!("{}: {err}: the still picture, not animating", s.name);
+                                crate::outln!("{}: {}, {err}: the still picture, not animating", s.name, th.name);
                                 stills.push(m);
                             }
                             Err(still) => crate::errln!("{}: {err}; {still}", s.name),

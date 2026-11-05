@@ -43,6 +43,7 @@ pub mod platform;
 pub mod plugins;
 pub mod rng;
 pub mod scene;
+pub mod setup;
 pub mod sources;
 pub mod still;
 pub mod svg;

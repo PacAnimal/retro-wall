@@ -122,7 +122,13 @@ macos/install                 # ~/Library/Application Support/retro-wall, a Laun
 macos/uninstall
 ```
 
-**Windows** (10 or 11): unpack `retro-wall-VERSION-windows-x86_64.zip`, then in that directory:
+**Windows** (10 or 11): download `retro-wall-VERSION-windows-setup.exe` and open it. Pick a theme and
+the rest on its tabs, then *Install*: for you only, no administrator needed. Change the settings later
+from the Start menu (*retro-wall settings*); remove it in Settings, Installed apps. The program is not
+signed yet, so Windows may first show "Windows protected your PC": choose *More info*, then *Run
+anyway*.
+
+Or, from `retro-wall-VERSION-windows-x86_64.zip`, in its directory:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File windows\install.ps1     # %LOCALAPPDATA%\retro-wall, at logon and now
@@ -153,7 +159,27 @@ The typeface, DejaVu Sans Mono, is carried in the program: nothing to install.
 OPTIONs are retro-wall's own and go in the LaunchAgent; run `macos/install` again to change them. On a
 Mac whose desktop picture is set by a configuration profile, retro-wall shows its still picture itself.
 
-### Windows installer
+### Windows setup program
+
+`retro-wall-setup.exe` carries the wall and its themes. Its window has a tab each for the theme (with a
+preview), the screens (one, every one, and where the hostname, instruments, graph and status line show
+on several), the instruments, pausing (on battery, with the screen off, during a Remote Desktop or VNC
+connection) and the rest. It keeps them in `%APPDATA%\retro`: the options on the `windows` line of
+`retro-wall.conf`, the screens and instruments in `retro.toml`, where your own lines are kept. It also
+works without a window:
+
+```powershell
+retro-wall-setup.exe --install theme=winter battery=on      # install or update; settings for a first install
+retro-wall-setup.exe --set hide=swap,deck rdp=3389          # change settings, and restart the wall
+retro-wall-setup.exe --get                                  # every setting
+retro-wall-setup.exe --uninstall --quiet [--keep-settings]
+```
+
+`retro-wall-setup.exe --help` names the keys. `windows\test-setup.ps1` tests it on a Windows machine
+that does not have retro-wall: install, change, update, uninstall, and its window, driven as
+clicks drive it.
+
+### Windows scripts
 
 `windows\install.ps1 [OPTION]...` takes retro-wall's options, for example `--theme neon_rain`. It
 installs into `%LOCALAPPDATA%\retro-wall` and registers the scheduled task `\retro-wall\retro-wall`,
@@ -179,7 +205,7 @@ Options for the autostarted instance go in `~/.config/retro/retro-wall.conf`, on
 sources go in `~/.config/retro/retro.toml`.
 
 Themes: `phosphor` (the default), `neon_rain`, `night_city`, `aurora`, `winter`, `matrix`, `guybrush`,
-`copperworks`, `racing`, `forest`.
+`copperworks`, `racing`, `forest`, `blocky`.
 
 ## Extending
 
