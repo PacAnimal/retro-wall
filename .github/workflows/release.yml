@@ -69,10 +69,17 @@ jobs:
           cp target/x86_64-pc-windows-gnu/release/retro-wall.exe "$d/"
           cp -R themes windows LICENSE README.md "$d/"
           zip -qr "$d.zip" "$d"
+      - name: The setup program, with the wall and its themes carried in it
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends libcairo2-dev
+          cargo run --release --example pack-setup -- target/x86_64-pc-windows-gnu/release/retro-wall-setup.exe \
+            target/x86_64-pc-windows-gnu/release/retro-wall.exe themes "retro-wall-$GITHUB_REF_NAME-windows-setup.exe"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows
-          path: retro-wall-*.zip
+          path: |
+            retro-wall-*.zip
+            retro-wall-*-setup.exe
 
   release:
     needs: [linux, macos, windows]

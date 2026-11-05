@@ -10,18 +10,24 @@ use retro_wall::cli::{self, Command, USAGE};
 use retro_wall::platform::{Native, Platform};
 use retro_wall::{config, day, elements, font, live, sources, util};
 
-/// This display's arguments from ~/.config/retro/retro-wall.conf: lines of display, then arguments.
+/// This display's arguments from retro-wall.conf (in the settings directory): lines of display, then
+/// arguments, a word with a space in double quotes. On Windows the display is `windows`, the line the
+/// setup program writes.
 fn configured() -> Vec<String> {
+    use retro_wall::setup::settings::{CONF_KEY, words};
     let key = |d: &str| {
+        if cfg!(windows) {
+            return d.to_string();
+        }
         let (host, rest) = d.rsplit_once(':').unwrap_or(("", d));
         format!("{host}:{}", if rest.contains('.') { rest.to_string() } else { format!("{rest}.0") })
     };
-    let display = key(&std::env::var("DISPLAY").unwrap_or_default());
+    let display = if cfg!(windows) { CONF_KEY.to_string() } else { key(&std::env::var("DISPLAY").unwrap_or_default()) };
     let text = retro_wall::files::read_text(&config::config_dir().join("retro-wall.conf"), retro_wall::files::Kind::Settings).unwrap_or_default();
     for line in text.lines() {
-        let words: Vec<&str> = line.split('#').next().unwrap_or("").split_whitespace().collect();
-        if !words.is_empty() && key(words[0]) == display {
-            return words[1..].iter().map(|s| s.to_string()).collect();
+        let w = words(line);
+        if !w.is_empty() && key(&w[0]) == display {
+            return w[1..].to_vec();
         }
     }
     vec![]
