@@ -238,7 +238,11 @@ Check 'nothing installed to begin with' {
 }
 Check 'an unknown key is refused, nothing done' {
     $r = Run $Setup @('--install', 'colour=blue')
-    if ($r.Code -ne 2) { "exit $($r.Code): $($r.Text)" } elseif (Test-Path $install) { 'it installed anyway' }
+    # the directory may be there already, with a log of a run before: what was installed is what counts
+    if ($r.Code -ne 2) { return "exit $($r.Code): $($r.Text)" }
+    if ((Test-Path $installed) -or (Test-Path (Join-Path $install 'retro-wall.exe'))) { return 'it installed anyway' }
+    $s = Run $Setup @('--status')
+    if ($s.Text -notmatch 'installed=no') { "status: $($s.Text)" }
 }
 # an install by windows\install.ps1 kept its options in the task: an update over it takes them up
 schtasks.exe /Create /TN '\retro-wall\retro-wall' /TR 'C:\Windows\System32\cmd.exe --theme winter --battery' /SC ONCE /ST 23:59 /F | Out-Null
