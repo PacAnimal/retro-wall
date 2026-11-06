@@ -39,10 +39,27 @@ pub fn daytime() -> f64 {
 }
 
 /// The local zone's current UTC offset in seconds: from the zone file TZ names (`Europe/Oslo`,
-/// `:Europe/Oslo`, or a path), else from /etc/localtime (TZif); 0 when neither reads.
+/// `:Europe/Oslo`, or a path), else from /etc/localtime (TZif); 0 when neither reads. Read once and
+/// kept until the zone's next change of offset, and read again at least hourly, so a zone file
+/// replaced takes effect within the hour: a wall asks every frame.
 fn local_offset(now: i64) -> i64 {
-    let named = std::env::var_os("TZ").and_then(|tz| zone_file(&tz.to_string_lossy()));
-    named.into_iter().chain([std::path::PathBuf::from("/etc/localtime")]).find_map(|p| std::fs::read(p).ok().and_then(|d| tz_offset(&d, now))).unwrap_or(0)
+    static KEPT: std::sync::Mutex<Option<(Option<std::ffi::OsString>, i64, i64)>> = std::sync::Mutex::new(None);
+    let tz = std::env::var_os("TZ");
+    let mut kept = KEPT.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((k, off, until)) = kept.as_ref()
+        && *k == tz
+        && now < *until
+    {
+        return *off;
+    }
+    let named = tz.as_ref().and_then(|tz| zone_file(&tz.to_string_lossy()));
+    let (off, next) = named
+        .into_iter()
+        .chain([std::path::PathBuf::from("/etc/localtime")])
+        .find_map(|p| std::fs::read(p).ok().and_then(|d| tz_offset_until(&d, now)))
+        .unwrap_or((0, i64::MAX));
+    *kept = Some((tz, off, next.min(now.saturating_add(3600))));
+    off
 }
 
 /// The zone file a TZ value names: a path as it is, a zone's name under the system's zone directory;
@@ -64,6 +81,11 @@ pub fn zone_file(tz: &str) -> Option<std::path::PathBuf> {
 
 /// The UTC offset at `now` in a TZif file; None for a file that is not one or is cut short.
 pub fn tz_offset(d: &[u8], now: i64) -> Option<i64> {
+    tz_offset_until(d, now).map(|(off, _)| off)
+}
+
+/// As `tz_offset`, and when the offset next changes (`i64::MAX` after the last change the file has).
+pub fn tz_offset_until(d: &[u8], now: i64) -> Option<(i64, i64)> {
     if d.get(..4)? != b"TZif" {
         return None;
     }
@@ -83,15 +105,17 @@ pub fn tz_offset(d: &[u8], now: i64) -> Option<i64> {
     let times = h + 44;
     let idx = times.checked_add(tc.checked_mul(w)?)?;
     let types = idx.checked_add(tc)?;
-    let mut which = 0usize;
+    let (mut which, mut next) = (0usize, i64::MAX);
     for i in 0..tc {
         let at = times + i * w;
         let t = if w == 8 { i64::from_be_bytes(d.get(at..at + 8)?.try_into().ok()?) } else { be(at)? };
         if t <= now {
             which = *d.get(idx + i)? as usize;
+        } else {
+            next = next.min(t);
         }
     }
-    be(types.checked_add(which.checked_mul(6)?)?)
+    Some((be(types.checked_add(which.checked_mul(6)?)?)?, next))
 }
 
 fn smooth(a: f64, b: f64, x: f64) -> f64 {
@@ -155,6 +179,9 @@ mod tests {
             assert!(tz_offset(&d[..n], 2000).is_none_or(|o| o == 7200), "cut at {n}");
         }
         assert_eq!(tz_offset(b"NotAZoneFile", 0), None);
+        // and when it changes next: the change, then none after the last
+        assert_eq!(tz_offset_until(&d, 999), Some((3600, 1000)));
+        assert_eq!(tz_offset_until(&d, 1000), Some((7200, i64::MAX)));
     }
 
     #[test]

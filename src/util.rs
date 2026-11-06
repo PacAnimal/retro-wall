@@ -702,6 +702,120 @@ pub fn write_raw(s: &mut ImageSurface, path: &std::path::Path) -> bool {
     ok && z.finish().is_ok()
 }
 
+/// A picture written as a PNG, quickly: zlib's fastest level, each row filtered by the one above.
+/// The pixels are the same as cairo's PNG has; the file is a little larger and made many times faster,
+/// which a large, busy picture on a small processor needs. Straight (not premultiplied) RGB or RGBA.
+pub fn write_png(s: &ImageSurface, path: &std::path::Path) -> bool {
+    use std::io::Write;
+    let (w, h, stride) = (s.width().max(0) as usize, s.height().max(0) as usize, s.stride() as usize);
+    let alpha = s.format() != Format::Rgb24;
+    let n = if alpha { 4 } else { 3 };
+    let mut src = vec![];
+    let _ = s.with_data(|d| src = d.to_vec());
+    if src.len() < stride * h {
+        return false;
+    }
+    // each row as PNG wants it, then filtered "up": the difference from the row above
+    let row_of = |y: usize| -> Vec<u8> {
+        let mut out = Vec::with_capacity(w * n);
+        for x in 0..w {
+            let p = &src[y * stride + x * 4..y * stride + x * 4 + 4];
+            let (b, g, r, a) = (p[0], p[1], p[2], p[3]);
+            if alpha {
+                let un = |v: u8| if a == 0 { 0 } else { ((v as u32 * 255 + a as u32 / 2) / a as u32).min(255) as u8 };
+                out.extend_from_slice(&[un(r), un(g), un(b), a]);
+            } else {
+                out.extend_from_slice(&[r, g, b]);
+            }
+        }
+        out
+    };
+    let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+    let mut above = vec![0u8; w * n];
+    for y in 0..h {
+        let row = row_of(y);
+        let up: Vec<u8> = row.iter().zip(&above).map(|(a, b)| a.wrapping_sub(*b)).collect();
+        if z.write_all(&[2]).is_err() || z.write_all(&up).is_err() {
+            return false;
+        }
+        above = row;
+    }
+    let Ok(idat) = z.finish() else { return false };
+    let chunk = |out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]| {
+        out.extend((data.len() as u32).to_be_bytes());
+        let mut crc = flate2::Crc::new();
+        crc.update(kind);
+        crc.update(data);
+        out.extend_from_slice(kind);
+        out.extend_from_slice(data);
+        out.extend(crc.sum().to_be_bytes());
+    };
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    let mut head = vec![];
+    head.extend((w as u32).to_be_bytes());
+    head.extend((h as u32).to_be_bytes());
+    head.extend_from_slice(&[8, if alpha { 6 } else { 2 }, 0, 0, 0]);
+    chunk(&mut png, b"IHDR", &head);
+    chunk(&mut png, b"IDAT", &idat);
+    chunk(&mut png, b"IEND", &[]);
+    std::fs::write(path, png).is_ok()
+}
+
+/// Pictures as bytes, to keep (`svg::kept_bytes`): each one's width and height, then its rows.
+pub fn pack_surfaces(pictures: &[ImageSurface]) -> Vec<u8> {
+    let mut out = (pictures.len() as u32).to_le_bytes().to_vec();
+    for p in pictures {
+        let (w, h) = (p.width().max(0) as usize, p.height().max(0) as usize);
+        out.extend((w as u32).to_le_bytes());
+        out.extend((h as u32).to_le_bytes());
+        let stride = p.stride() as usize;
+        let _ = p.with_data(|d| {
+            for row in 0..h {
+                out.extend_from_slice(&d[row * stride..row * stride + w * 4]);
+            }
+        });
+    }
+    out
+}
+
+/// A picture from its pixels' bytes, `w` x `h`, rows packed, each pixel premultiplied B, G, R, A (as a
+/// traced picture's, `trace::sprites::Backdrop`'s planes, and `Gfx::replace_bytes` takes them).
+pub fn picture(bytes: &[u8], w: i32, h: i32) -> ImageSurface {
+    let mut s = surface(w, h);
+    let (stride, row) = (s.stride() as usize, w.max(0) as usize * 4);
+    if let Some(mut d) = view(&mut s) {
+        for (y, src) in bytes.chunks(row.max(1)).take(h.max(0) as usize).enumerate() {
+            d[y * stride..y * stride + src.len()].copy_from_slice(src);
+        }
+    }
+    s
+}
+
+/// The pictures `pack_surfaces` made; None where the bytes are not whole.
+pub fn unpack_surfaces(bytes: &[u8]) -> Option<Vec<ImageSurface>> {
+    let word = |at: &mut usize| -> Option<usize> {
+        let v = u32::from_le_bytes(bytes.get(*at..*at + 4)?.try_into().ok()?) as usize;
+        *at += 4;
+        Some(v)
+    };
+    let mut at = 0usize;
+    let n = word(&mut at)?;
+    let mut sizes = vec![];
+    let mut out = Vec::with_capacity(n.min(4096));
+    for _ in 0..n {
+        let (w, h) = (word(&mut at)?, word(&mut at)?);
+        sizes.push((w, h, at));
+        at = at.checked_add(w.checked_mul(h)?.checked_mul(4)?)?;
+        if at > bytes.len() {
+            return None;
+        }
+    }
+    for (w, h, from) in sizes {
+        out.push(picture(&bytes[from..from + w * h * 4], w as i32, h as i32));
+    }
+    (at == bytes.len()).then_some(out)
+}
+
 pub fn read_raw(path: &std::path::Path) -> Option<ImageSurface> {
     use std::io::Read;
     let f = std::fs::File::open(path).ok()?;
@@ -752,6 +866,43 @@ fn ink_in(data: &[u8], stride: usize, w: i32, h: i32, pad: i32) -> Option<(i32, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_fast_png_reads_back_as_the_picture() {
+        for format in [Format::Rgb24, Format::ARgb32] {
+            let mut s = ImageSurface::create(format, 37, 23).unwrap();
+            let stride = s.stride() as usize;
+            {
+                let mut d = s.data().unwrap();
+                for y in 0..23 {
+                    for x in 0..37 {
+                        // premultiplied: no channel above the alpha
+                        let a = if format == Format::Rgb24 { 255 } else { ((x * 7 + y * 13) % 256) as u8 };
+                        let v = |k: usize| ((x * 31 + y * 17 + k * 50) % 256) as u32 * a as u32 / 255;
+                        d[y * stride + x * 4..y * stride + x * 4 + 4].copy_from_slice(&[v(0) as u8, v(1) as u8, v(2) as u8, a]);
+                    }
+                }
+            }
+            let path = std::env::temp_dir().join(format!("retro-wall-png-{}-{format:?}.png", std::process::id()));
+            assert!(write_png(&s, &path));
+            let mut back = ImageSurface::create_from_png(&mut std::fs::File::open(&path).unwrap()).unwrap();
+            let _ = std::fs::remove_file(&path);
+            assert_eq!((back.width(), back.height()), (37, 23));
+            let bs = back.stride() as usize;
+            let (a, b) = (s.data().unwrap().to_vec(), back.data().unwrap().to_vec());
+            for y in 0..23 {
+                for x in 0..37 {
+                    let (p, q) = (&a[y * stride + x * 4..y * stride + x * 4 + 4], &b[y * bs + x * 4..y * bs + x * 4 + 4]);
+                    if format == Format::Rgb24 {
+                        assert_eq!(p[..3], q[..3], "at {x}, {y}");
+                    } else {
+                        // straight in the file, premultiplied again on reading: within a step of rounding
+                        assert!(p.iter().zip(q).all(|(u, v)| u.abs_diff(*v) <= 1), "at {x}, {y}: {p:?} {q:?}");
+                    }
+                }
+            }
+        }
+    }
     use std::time::Duration;
 
     #[test]

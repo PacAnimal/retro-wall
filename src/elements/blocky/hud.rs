@@ -1,8 +1,7 @@
 //! The heads-up display, in the pixels of a block game's interface, each `scale` screen pixels: the
-//! hotbar with its tools and blocks, and over it the hearts, the food and the experience
-//! bar with its level, which follow readings of the machine.
+//! hotbar with its tools, and over it the hearts, the food and the experience bar with its level, which
+//! follow readings of the machine.
 
-use super::textures::{self, Textures};
 use cairo::Context;
 
 /// A picture as rows of characters, each a colour in its palette ('.' clear).
@@ -13,8 +12,13 @@ struct Art<'a> {
 
 impl Art<'_> {
     fn paint(&self, c: &Context, x: f64, y: f64, s: f64) {
+        self.paint_columns(c, x, y, s, 0..usize::MAX);
+    }
+
+    /// Only the columns in `cols`: half an icon.
+    fn paint_columns(&self, c: &Context, x: f64, y: f64, s: f64, cols: std::ops::Range<usize>) {
         for (j, row) in self.rows.iter().enumerate() {
-            for (i, ch) in row.chars().enumerate() {
+            for (i, ch) in row.chars().enumerate().filter(|(i, _)| cols.contains(i)) {
                 let Some(&(_, rgb, a)) = self.palette.iter().find(|p| p.0 == ch) else { continue };
                 c.set_source_rgba(((rgb >> 16) & 255) as f64 / 255.0, ((rgb >> 8) & 255) as f64 / 255.0, (rgb & 255) as f64 / 255.0, a);
                 c.rectangle(x + i as f64 * s, y + j as f64 * s, s, s);
@@ -24,145 +28,122 @@ impl Art<'_> {
     }
 }
 
-const HEART: &[&str] = &[".KK...KK.", "KrrK.KrrK", "KrwrKrrrK", "KrrrrrrrK", "KrrrrrrdK", ".KrrrrdK.", "..KrrdK..", "...KdK...", "....K...."];
-const HEART_LEFT: &[&str] = &[".KK......", "KrrK.....", "KrwrK....", "KrrrrK...", "KrrrrK...", ".KrrrK...", "..KrrK...", "...KdK...", "....K...."];
-const HEART_EMPTY: &[&str] = &[".KK...KK.", "KeeK.KeeK", "KeeeKeeeK", "KeeeeeeeK", "KeeeeeeeK", ".KeeeeeK.", "..KeeeK..", "...KeK...", "....K...."];
-const HEART_COLOURS: &[(char, u32, f64)] = &[('K', 0x000000, 1.0), ('r', 0xe01414, 1.0), ('d', 0x9c0a0a, 1.0), ('w', 0xffb4b4, 1.0), ('e', 0x2a1010, 0.75)];
+/// A heart, a glint at its top left and its lower edges shaded; empty, its outline round a dark middle.
+const HEART: &[&str] = &[".KK...KK.", "KrpK.KrrK", "KpwrKrrrK", "KrrrrrrrK", "KdrrrrrdK", ".KdrrrdK.", "..KdrdK..", "...KdK...", "....K...."];
+const HEART_COLOURS: &[(char, u32, f64)] = &[('K', 0x2c0404, 1.0), ('r', 0xee3a2a, 1.0), ('d', 0xb01c12, 1.0), ('p', 0xff9a8c, 1.0), ('w', 0xffffff, 1.0)];
+const HEART_EMPTY: &[(char, u32, f64)] = &[('K', 0x2c0404, 1.0), ('r', 0x3a1414, 0.75), ('d', 0x3a1414, 0.75), ('p', 0x3a1414, 0.75), ('w', 0x3a1414, 0.75)];
 
-/// A shank, as the game draws it: the meat at the top left, its bone out at the bottom right; the
-/// right half of it, for a half; and its dark outline when eaten.
-const FOOD: &[&str] = &["..KK.....", ".KrRK....", "KrprbK...", "KRrbmbK..", ".KdDmmK..", "..KdDDK..", "...KKKwK.", "......KWK", "......KK."];
-const FOOD_RIGHT: &[&str] = &[".........", "....K....", "....bK...", "....mbK..", "....mmK..", "....DDK..", "....KKwK.", "......KWK", "......KK."];
-const FOOD_EMPTY: &[&str] = &["..KK.....", ".KeeK....", "KeeeeK...", "KeeeeeK..", ".KeeeeK..", "..KeeeK..", "...KKKeK.", "......KeK", "......KK."];
-const FOOD_COLOURS: &[(char, u32, f64)] = &[
-    ('K', 0x000000, 1.0),
-    ('r', 0xd42a2a, 1.0),
-    ('R', 0xb21818, 1.0),
-    ('p', 0xdfb18f, 1.0),
-    ('b', 0xb88458, 1.0),
-    ('m', 0x9d6d43, 1.0),
-    ('d', 0x613c1b, 1.0),
-    ('D', 0x7b512d, 1.0),
-    ('w', 0xe2d5aa, 1.0),
-    ('W', 0xfff7dc, 1.0),
-    ('e', 0x282828, 0.9),
-];
+/// A drumstick: the meat at the top left, red with a glint over cooked brown, its bone out at the bottom
+/// right.
+const FOOD: &[&str] = &["..KKK....", ".KRpRK...", "KRpwRRK..", "KRRRRttK.", "KRRRtttK.", ".KRttdK..", "..KKKKWK.", "......KWK", ".......K."];
+const FOOD_COLOURS: &[(char, u32, f64)] =
+    &[('K', 0x140804, 1.0), ('R', 0xc83828, 1.0), ('p', 0xf07a62, 1.0), ('w', 0xffc4b0, 1.0), ('t', 0xb47a4c, 1.0), ('d', 0x8a5634, 1.0), ('W', 0xe8e4d8, 1.0)];
+const FOOD_EMPTY: &[(char, u32, f64)] =
+    &[('K', 0x140804, 1.0), ('R', 0x282828, 0.9), ('p', 0x282828, 0.9), ('w', 0x282828, 0.9), ('t', 0x282828, 0.9), ('d', 0x282828, 0.9), ('W', 0x282828, 0.9)];
 
+// The tools, 16 pixels square, lit from the top left: each filled pixel gets the tool's dark outline on
+// its open sides when drawn (`item`), so the grids hold the fill alone.
 const SWORD: &[&str] = &[
-    "............KKK.",
-    "...........KwlK.",
-    "..........KwlmK.",
-    ".........KwlmK..",
-    "........KwlmK...",
-    ".......KwlmK....",
-    "..KK..KwlmK.....",
-    "..KdK.KlmK......",
-    "...KdKlmK.......",
-    "....KdmK........",
-    "....KhKdK.......",
-    "...KhK.KdK......",
-    "..KhK...KK......",
-    ".KbK............",
-    ".KK.............",
+    "................",
+    ".............wl.",
+    "............wllm",
+    "...........wllm.",
+    "..........wllm..",
+    ".........wllm...",
+    "........wllm....",
+    ".......wllm.....",
+    "..G...wllm......",
+    "...G.wllm.......",
+    "....Gllm........",
+    "....hGG.........",
+    "...hb..G........",
+    "..hb............",
+    ".gG.............",
+    ".G..............",
+];
+const SHOVEL: &[&str] = &[
+    "................",
+    "...........wl...",
+    "..........wllm..",
+    "..........llmmn.",
+    ".........lllmmn.",
+    ".........llmmn..",
+    ".........hmnn...",
+    "........hb......",
+    ".......hb.......",
+    "......hb........",
+    ".....hb.........",
+    "....hb..........",
+    "...hb...........",
+    "..hb............",
+    ".hb.............",
     "................",
 ];
 const PICKAXE: &[&str] = &[
     "................",
-    "....KKKKKK......",
-    "...KwllllmK.....",
-    "....KKKKlmmK....",
-    "........KhmK....",
-    ".......KhKmmK...",
-    "......KhK.KmK...",
-    ".....KhK..KmK...",
-    "....KhK....KK...",
-    "...KhK..........",
-    "..KhK...........",
-    ".KbK............",
-    ".KK.............",
     "................",
+    "....wwwwwl......",
+    "....nnmmmmll....",
+    "..........nml...",
+    ".........hbnml..",
+    "........hb..nml.",
+    ".......hb....ml.",
+    "......hb.....ml.",
+    ".....hb......nm.",
+    "....hb.......n..",
+    "...hb...........",
+    "..hb............",
+    ".hb.............",
     "................",
     "................",
 ];
 const AXE: &[&str] = &[
     "................",
-    "......KKK.......",
-    ".....KwllK......",
-    "....KwlmmK......",
-    "....KlmKhK......",
-    ".....KKhKmK.....",
-    "......KhK.K.....",
-    ".....KhK........",
-    "....KhK.........",
-    "...KhK..........",
-    "..KhK...........",
-    ".KbK............",
-    ".KK.............",
-    "................",
-    "................",
-    "................",
-];
-const SHOVEL: &[&str] = &[
-    "................",
-    "..........KKK...",
-    ".........KwllK..",
-    "........KwlmmK..",
-    "........KlmmK...",
-    ".......KKmmK....",
-    "......KhKKK.....",
-    ".....KhK........",
-    "....KhK.........",
-    "...KhK..........",
-    "..KhK...........",
-    ".KbK............",
-    ".KK.............",
-    "................",
+    ".........wl.....",
+    "........wllm....",
+    ".......wlllmhb..",
+    "........llmhb...",
+    ".......wlmhb....",
+    "........nhb.....",
+    ".......hbn......",
+    "......hb........",
+    ".....hb.........",
+    "....hb..........",
+    "...hb...........",
+    "..hb............",
+    ".hb.............",
     "................",
     "................",
 ];
-/// Iron's colours, and the stick's.
-const TOOL_COLOURS: &[(char, u32, f64)] =
-    &[('K', 0x1e1e1e, 1.0), ('w', 0xffffff, 1.0), ('l', 0xd8d8d8, 1.0), ('m', 0x9a9a9a, 1.0), ('d', 0x4a3a1a, 1.0), ('h', 0x896727, 1.0), ('b', 0x5c4418, 1.0)];
-const DIAMOND_COLOURS: &[(char, u32, f64)] =
-    &[('K', 0x0c2a28, 1.0), ('w', 0xd6fff6, 1.0), ('l', 0x4aeddb, 1.0), ('m', 0x1ea595, 1.0), ('d', 0x4a3a1a, 1.0), ('h', 0x896727, 1.0), ('b', 0x5c4418, 1.0)];
-const TORCH: &[&str] = &[
+const HOE: &[&str] = &[
     "................",
-    ".......yy.......",
-    "......yooy......",
-    "......yOOy......",
-    ".......hh.......",
+    "................",
+    ".......wwwll....",
+    ".......nnmmml...",
+    "...........hml..",
+    "..........hb.n..",
+    ".........hb.....",
+    "........hb......",
     ".......hb.......",
-    ".......hb.......",
-    ".......hb.......",
-    ".......hb.......",
-    ".......hb.......",
-    ".......hb.......",
-    ".......hb.......",
-    ".......hb.......",
-    ".......bb.......",
+    "......hb........",
+    ".....hb.........",
+    "....hb..........",
+    "...hb...........",
+    "..hb............",
     "................",
     "................",
 ];
-const TORCH_COLOURS: &[(char, u32, f64)] = &[('y', 0xffd84a, 1.0), ('o', 0xfff3a0, 1.0), ('O', 0xffffff, 1.0), ('h', 0x896727, 1.0), ('b', 0x5c4418, 1.0)];
-const BREAD: &[&str] = &[
-    "................",
-    "................",
-    "................",
-    "..........KKK...",
-    ".......KKKlllK..",
-    "....KKKlllllmK..",
-    "..KKlllllmmlmK..",
-    ".KlllmmlllmmmK..",
-    ".KllmmmlmmmmK...",
-    "KlmmmmmmmmdK....",
-    "KmmmmmmmddK.....",
-    "KmmmmddddK......",
-    ".KddddKKK.......",
-    "..KKKK..........",
-    "................",
-    "................",
+/// Diamond: the head's four shades, the stick's two, a sword's guard and pommel.
+const DIAMOND: &[(char, u32, f64)] = &[
+    ('w', 0xeafffb, 1.0),
+    ('l', 0x63f0dd, 1.0),
+    ('m', 0x25b4a2, 1.0),
+    ('n', 0x137468, 1.0),
+    ('h', 0xb07a34, 1.0),
+    ('b', 0x6a4618, 1.0),
+    ('g', 0x2fc4b0, 1.0),
+    ('G', 0x137468, 1.0),
 ];
-const BREAD_COLOURS: &[(char, u32, f64)] = &[('K', 0x3a2408, 1.0), ('l', 0xe8b860, 1.0), ('m', 0xc08a34, 1.0), ('d', 0x8a5a1c, 1.0)];
 
 /// The interface's digits, five pixels by seven.
 const DIGITS: [[&str; 7]; 10] = [
@@ -190,12 +171,6 @@ fn number(c: &Context, n: u32, x: f64, y: f64, s: f64, rgb: u32) {
         let palette = [('#', rgb, 1.0)];
         Art { rows: &DIGITS[d], palette: &palette }.paint(c, x + k as f64 * 6.0 * s, y, s);
     }
-}
-
-/// A stack's count, as the interface shows it: white, with its shadow down and right.
-fn count(c: &Context, n: u32, x: f64, y: f64, s: f64) {
-    number(c, n, x + s, y + s, s, 0x3f3f3f);
-    number(c, n, x, y, s, 0xffffff);
 }
 
 /// Where the HUD's pieces are, in screen pixels.
@@ -233,11 +208,11 @@ pub struct Status {
 
 /// The hotbar with its items, which never changes, into a picture of its own the size of
 /// `Layout::hotbar`, at its top left.
-pub fn paint_hotbar(c: &Context, l: &Layout, tex: &Textures) {
+pub fn paint_hotbar(c: &Context, l: &Layout) {
     let s = l.s;
     c.translate(-l.hotbar.0, -l.hotbar.1);
     // the hotbar: nine slots in a black frame, each lit at its top and left edges, a grey line within
-    // that and a shadow within that, its middle a faint dark glass over the world
+    // that and a shadow within that, its middle a dark glass over the world
     let (x, y) = l.bar;
     let fill = |r: f64, a: f64, x0: f64, y0: f64, w: f64, h: f64| {
         c.set_source_rgba(r, r, r, a);
@@ -250,7 +225,7 @@ pub fn paint_hotbar(c: &Context, l: &Layout, tex: &Textures) {
     fill(0.01, 0.95, x + 181.0 * s, y, s, 22.0 * s);
     for k in 0..9 {
         let sx = x + (1.0 + 20.0 * k as f64) * s;
-        fill(0.0, 0.28, sx + 3.0 * s, y + 4.0 * s, 15.0 * s, 15.0 * s);
+        fill(0.0, 0.55, sx + 3.0 * s, y + 4.0 * s, 15.0 * s, 15.0 * s);
         fill(0.62, 0.95, sx, y + s, 20.0 * s, s);
         fill(0.6, 0.95, sx, y + s, s, 20.0 * s);
         fill(0.36, 0.95, sx + s, y + 2.0 * s, 19.0 * s, s);
@@ -262,26 +237,13 @@ pub fn paint_hotbar(c: &Context, l: &Layout, tex: &Textures) {
         fill(0.37, 0.95, sx + s, y + 20.0 * s, 19.0 * s, s);
         fill(0.37, 0.95, sx + 19.0 * s, y + 2.0 * s, s, 19.0 * s);
     }
-    // the items: a diamond sword, iron tools, torches, bread and blocks
-    let slot = |k: usize| (x + (3.0 + 20.0 * k as f64) * s, y + 3.0 * s);
-    let tools: [(&[&str], &[(char, u32, f64)]); 4] = [(SWORD, DIAMOND_COLOURS), (PICKAXE, DIAMOND_COLOURS), (AXE, TOOL_COLOURS), (SHOVEL, TOOL_COLOURS)];
-    for (k, (rows, palette)) in tools.into_iter().enumerate() {
-        let (ix, iy) = slot(k);
-        Art { rows, palette }.paint(c, ix, iy, s);
+    // the tools, all diamond, the rest of the slots empty
+    for (k, rows) in [SWORD, SHOVEL, PICKAXE, AXE, HOE].into_iter().enumerate() {
+        let (ix, iy) = (x + (3.0 + 20.0 * k as f64) * s, y + 3.0 * s);
+        item(c, Art { rows, palette: DIAMOND }, 0x082220, ix, iy, s);
     }
-    let (ix, iy) = slot(4);
-    Art { rows: TORCH, palette: TORCH_COLOURS }.paint(c, ix, iy, s);
-    count(c, 64, ix + (17.0 - number_width(64)) * s, iy + 9.0 * s, s);
-    let (ix, iy) = slot(5);
-    Art { rows: BREAD, palette: BREAD_COLOURS }.paint(c, ix, iy, s);
-    count(c, 23, ix + (17.0 - number_width(23)) * s, iy + 9.0 * s, s);
-    for (k, faces, n) in [(6, [textures::GRASS_TOP, textures::GRASS_SIDE], 64), (7, [textures::COBBLE; 2], 37)] {
-        let (ix, iy) = slot(k);
-        cube(c, tex, faces, ix, iy, s);
-        count(c, n, ix + (17.0 - number_width(n)) * s, iy + 9.0 * s, s);
-    }
-    // the selected slot: the empty hand's, framed white
-    let sel = 8.0;
+    // the selected slot: the sword's, framed white
+    let sel = 0.0;
     let (fx, fy) = (x + (sel * 20.0 - 1.0) * s, y - s);
     c.set_source_rgba(0.0, 0.0, 0.0, 0.9);
     frame(c, fx, fy, 24.0 * s, 24.0 * s, s);
@@ -289,6 +251,22 @@ pub fn paint_hotbar(c: &Context, l: &Layout, tex: &Textures) {
     frame(c, fx + s, fy + s, 22.0 * s, 22.0 * s, s);
     c.set_source_rgb(0.75, 0.75, 0.75);
     frame(c, fx + 2.0 * s, fy + 2.0 * s, 20.0 * s, 20.0 * s, s);
+}
+
+/// An item: its picture over an outline in `edge`, one pixel round its filled pixels on their open
+/// sides, so it stands out of the world behind the slot's glass.
+fn item(c: &Context, art: Art, edge: u32, x: f64, y: f64, s: f64) {
+    let filled = |i: i32, j: i32| i >= 0 && j >= 0 && art.rows.get(j as usize).and_then(|r| r.as_bytes().get(i as usize)).is_some_and(|&b| b != b'.');
+    c.set_source_rgb(((edge >> 16) & 255) as f64 / 255.0, ((edge >> 8) & 255) as f64 / 255.0, (edge & 255) as f64 / 255.0);
+    for j in 0..16 {
+        for i in 0..16 {
+            if !filled(i, j) && [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(di, dj)| filled(i + di, j + dj)) {
+                c.rectangle(x + i as f64 * s, y + j as f64 * s, s, s);
+            }
+        }
+    }
+    let _ = c.fill();
+    art.paint(c, x, y, s);
 }
 
 /// A frame `t` thick inside the rectangle.
@@ -300,50 +278,6 @@ fn frame(c: &Context, x: f64, y: f64, w: f64, h: f64, t: f64) {
     let _ = c.fill();
 }
 
-/// A block as the hotbar shows it: a cube seen from above and to the side, 16 interface pixels across,
-/// its top and its two sides each shaded, drawn pixel by pixel on the screen.
-fn cube(c: &Context, tex: &Textures, faces: [usize; 2], x: f64, y: f64, s: f64) {
-    let size = (16.0 * s).round() as i32;
-    let (cx, top) = (size as f64 / 2.0, 1.0 * s);
-    // the cube's corners: its top a rhombus a quarter as tall as wide
-    let half = size as f64 * 0.44;
-    let rise = half * 0.5;
-    let side = size as f64 * 0.5;
-    for py in 0..size {
-        for px in 0..size {
-            let (fx, fy) = (px as f64 + 0.5 - cx, py as f64 + 0.5 - top - rise);
-            // the top: u along the left edge, v along the right
-            let (a, b) = ((fx / half + fy / rise) * 0.5, (-fx / half + fy / rise) * 0.5);
-            let (u, v, face, k) = if (-1.0..=0.0).contains(&a) && (-1.0..=0.0).contains(&b) {
-                ((a + 1.0) as f32, (b + 1.0) as f32, faces[0], 1.0f32)
-            } else if fx < 0.0 && fx >= -half {
-                // the left side: across from its outer edge, down from its top edge
-                let u = (fx + half) / half;
-                let edge = fy - (fx + half) / half * rise;
-                let v = edge / side;
-                if !(0.0..1.0).contains(&v) {
-                    continue;
-                }
-                (u as f32, v as f32, faces[1], 0.62)
-            } else if fx >= 0.0 && fx <= half {
-                let u = fx / half;
-                let edge = fy - (1.0 - fx / half) * rise;
-                let v = edge / side;
-                if !(0.0..1.0).contains(&v) {
-                    continue;
-                }
-                (u as f32, v as f32, faces[1], 0.8)
-            } else {
-                continue;
-            };
-            let t = tex.all[face].at(u.clamp(0.0, 0.999), v.clamp(0.0, 0.999), 0);
-            c.set_source_rgb((t[0] * k) as f64, (t[1] * k) as f64, (t[2] * k) as f64);
-            c.rectangle(x + px as f64, y + py as f64, 1.0, 1.0);
-            let _ = c.fill();
-        }
-    }
-}
-
 /// The status rows, into a picture of their own the size of `Layout::status`, at its top left.
 pub fn paint_status(c: &Context, l: &Layout, st: &Status) {
     let s = l.s;
@@ -352,16 +286,16 @@ pub fn paint_status(c: &Context, l: &Layout, st: &Status) {
     // hearts on the left, food on the right, both over the bar
     for k in 0..10u32 {
         let hx = x0 + k as f64 * 8.0 * s;
-        let rows = if st.health >= 2 * k + 2 { HEART } else { HEART_EMPTY };
-        Art { rows, palette: HEART_COLOURS }.paint(c, hx, 3.0 * s, s);
+        let palette = if st.health >= 2 * k + 2 { HEART_COLOURS } else { HEART_EMPTY };
+        Art { rows: HEART, palette }.paint(c, hx, 3.0 * s, s);
         if st.health == 2 * k + 1 {
-            Art { rows: HEART_LEFT, palette: HEART_COLOURS }.paint(c, hx, 3.0 * s, s);
+            Art { rows: HEART, palette: HEART_COLOURS }.paint_columns(c, hx, 3.0 * s, s, 0..5);
         }
         let fx = x0 + (182.0 - 9.0 - k as f64 * 8.0) * s;
-        let rows = if st.food >= 2 * k + 2 { FOOD } else { FOOD_EMPTY };
-        Art { rows, palette: FOOD_COLOURS }.paint(c, fx, 3.0 * s, s);
+        let palette = if st.food >= 2 * k + 2 { FOOD_COLOURS } else { FOOD_EMPTY };
+        Art { rows: FOOD, palette }.paint(c, fx, 3.0 * s, s);
         if st.food == 2 * k + 1 {
-            Art { rows: FOOD_RIGHT, palette: FOOD_COLOURS }.paint(c, fx, 3.0 * s, s);
+            Art { rows: FOOD, palette: FOOD_COLOURS }.paint_columns(c, fx, 3.0 * s, s, 4..9);
         }
     }
     // the experience bar

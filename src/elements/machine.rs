@@ -185,12 +185,6 @@ fn paint_quads(c: &Context, s: &ImageSurface, data: &[f32]) {
 }
 
 /// A hash of what a vertex array draws.
-fn hash_verts(h: &mut u64, d: &[f32]) {
-    for v in d {
-        *h = (*h ^ v.to_bits() as u64).wrapping_mul(0x100000001b3);
-    }
-}
-
 /// A reading that drives a part: the value it shows, eased from its own idle motion toward the reading
 /// (0 to 1) while there is one, and back while the source is stale. A source may name alternatives,
 /// "bat|swap": the first the machine has.

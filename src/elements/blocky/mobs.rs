@@ -3,6 +3,7 @@
 //! coats a texel's noise, a cow's patches, a cat's stripes.
 
 use super::world::{AIR, MOB, RAIL, RAIL_Z, Shape, WATER, World, block};
+use crate::trace::rig::{Hinge, Pose, RigHit};
 use std::collections::HashMap;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -312,40 +313,35 @@ pub fn hit_one(kind: Kind, at: [f64; 3], yaw: f64, o: [f64; 3], d: [f64; 3]) -> 
 
 /// The same, its legs as they are at `walk`.
 pub fn hit_walking(kind: Kind, at: [f64; 3], yaw: f64, walk: Walk, o: [f64; 3], d: [f64; 3]) -> Option<MobHit> {
-    let (c, s) = (yaw.cos(), yaw.sin());
-    // the ray in the mob's own frame, in sixteenths: turned back by its turn about its feet
-    let back = |v: [f64; 3]| [v[0] * c - v[2] * s, v[1], v[0] * s + v[2] * c];
-    let lo = back([o[0] - at[0], o[1] - at[1], o[2] - at[2]]).map(|v| v * 16.0);
-    let ld = back(d).map(|v| v * 16.0);
-    let mut best: Option<MobHit> = None;
-    for (pi, p) in model(kind).iter().enumerate() {
-        // a leg in its swing: the ray turned back about its hip (the top of the leg, across the body)
-        let swing = swing(kind, pi, walk);
-        let hip = [0.0, p.hi[1], (p.lo[2] + p.hi[2]) * 0.5];
-        let (sc, ss) = (swing.cos(), swing.sin());
-        // about the sideways axis: by -swing into the leg's frame, by +swing out of it
-        let turn = |v: [f64; 3], k: f64| [v[0], v[1] * sc + v[2] * ss * k, -v[1] * ss * k + v[2] * sc];
-        let (ro, rd) = if swing == 0.0 {
-            (lo, ld)
-        } else {
-            let rel = turn([lo[0], lo[1] - hip[1], lo[2] - hip[2]], 1.0);
-            ([rel[0], rel[1] + hip[1], rel[2] + hip[2]], turn(ld, 1.0))
-        };
-        let Some((t, axis, sign)) = slab(ro, rd, p.lo, p.hi) else { continue };
-        if best.as_ref().is_some_and(|b| b.t <= t) {
-            continue;
-        }
-        let local: [f64; 3] = std::array::from_fn(|k| ro[k] + rd[k] * t);
-        let colour = paint(p, pi, axis, sign, local);
-        let mut n = [0.0; 3];
-        n[axis] = sign;
-        // the leg's normal turned out of its swing, then out into the world
-        let n = if swing == 0.0 { n } else { turn(n, -1.0) };
-        let normal = [n[0] * c + n[2] * s, n[1], -n[0] * s + n[2] * c];
-        let cell = [at[0].floor() as i32, (at[1] + 0.3).floor() as i32, at[2].floor() as i32];
-        best = Some(MobHit { t, colour, normal, cell });
-    }
-    best
+    seen(kind, at, &pose(kind, at, yaw, walk, o), d)
+}
+
+/// A mob of a kind standing at `at`, turned by `yaw`, its legs as they are at `walk`, seen from `o`:
+/// each leg on its hinge, about its hip (the top of the leg, across the body). In sixteenths.
+pub fn pose(kind: Kind, at: [f64; 3], yaw: f64, walk: Walk, o: [f64; 3]) -> Pose {
+    let parts = model(kind).iter().enumerate().map(|(pi, p)| {
+        let hinge = Hinge { axis: 0, pivot: [0.0, p.hi[1], (p.lo[2] + p.hi[2]) * 0.5], angle: swing(kind, pi, walk) };
+        (p.lo, p.hi, Some(hinge))
+    });
+    Pose::new(parts, at, yaw, 16.0, o)
+}
+
+/// What the ray from the eye along `d` meets of a mob of a kind at `at`, posed (`pose`): how far, its colour
+/// there and its normal.
+pub fn seen(kind: Kind, at: [f64; 3], pose: &Pose, d: [f64; 3]) -> Option<MobHit> {
+    Some(coloured(kind, at, pose.hit(d)?))
+}
+
+/// The colour of a mob's coat where a ray meets it.
+pub fn coat(kind: Kind, h: &RigHit) -> [f32; 3] {
+    paint(&model(kind)[h.part], h.part, h.axis, h.sign, h.local)
+}
+
+/// A ray's hit on a mob of a kind at `at`, with the colour of its coat there.
+pub fn coloured(kind: Kind, at: [f64; 3], h: RigHit) -> MobHit {
+    let colour = coat(kind, &h);
+    let cell = [at[0].floor() as i32, (at[1] + 0.3).floor() as i32, at[2].floor() as i32];
+    MobHit { t: h.t, colour, normal: h.normal, cell }
 }
 
 /// How far a mob of a kind reaches about its feet, and how tall it is, in blocks.
@@ -354,31 +350,6 @@ pub fn reach(kind: Kind) -> (f64, f64) {
     let reach = parts.iter().flat_map(|p| [p.lo, p.hi]).map(|c| c[0].hypot(c[2])).fold(0.0, f64::max) / 16.0;
     let tall = parts.iter().map(|p| p.hi[1]).fold(0.0, f64::max) / 16.0;
     (reach, tall)
-}
-
-/// Where a ray meets a box from outside: how far, and the face's axis and side.
-pub fn slab(o: [f64; 3], d: [f64; 3], lo: [f64; 3], hi: [f64; 3]) -> Option<(f64, usize, f64)> {
-    let (mut t0, mut t1, mut axis, mut sign) = (f64::MIN, f64::MAX, 0, 1.0);
-    for i in 0..3 {
-        if d[i].abs() < 1e-12 {
-            if o[i] < lo[i] || o[i] > hi[i] {
-                return None;
-            }
-            continue;
-        }
-        let (a, b) = ((lo[i] - o[i]) / d[i], (hi[i] - o[i]) / d[i]);
-        let (near, far) = if a < b { (a, b) } else { (b, a) };
-        if near > t0 {
-            t0 = near;
-            axis = i;
-            sign = if d[i] > 0.0 { -1.0 } else { 1.0 };
-        }
-        t1 = t1.min(far);
-    }
-    if t0 > t1 || t1 < 0.0 || t0 < 0.0 {
-        return None;
-    }
-    Some((t0, axis, sign))
 }
 
 /// A box's colour at a point of its face, in sixteenths.

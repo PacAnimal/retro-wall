@@ -119,8 +119,20 @@ fn hill(seed: i64, k: i64) -> Option<(f64, f64, f64)> {
 
 /// The road's height at distance s, and its slope: smooth hills and dips, each a raised cosine.
 fn height(seed: i64, s: f64) -> (f64, f64) {
-    let k = (s / HILL_CELL).floor() as i64;
-    match hill(seed, k) {
+    height_on(s, hill(seed, (s / HILL_CELL).floor() as i64))
+}
+
+/// The road's height at s, on the hill of its cell, as `height_on` has it, without its slope.
+fn height_only(s: f64, hill: Option<(f64, f64, f64)>) -> f64 {
+    match hill {
+        Some((at, len, high)) if (at..at + len).contains(&s) => high * (1.0 - (2.0 * PI * ((s - at) / len)).cos()) / 2.0,
+        _ => 0.0,
+    }
+}
+
+/// The road's height and slope at s, on the hill of its cell (`hill`).
+fn height_on(s: f64, hill: Option<(f64, f64, f64)>) -> (f64, f64) {
+    match hill {
         Some((at, len, high)) if (at..at + len).contains(&s) => {
             let u = (s - at) / len;
             (high * (1.0 - (2.0 * PI * u).cos()) / 2.0, high * PI / len * (2.0 * PI * u).sin())
@@ -136,6 +148,15 @@ fn height(seed: i64, s: f64) -> (f64, f64) {
 const ROWS: usize = 512;
 /// The highest the road can be seen: a hill ahead rises over the horizon.
 const ROWS_TOP: f64 = HORIZON - 260.0;
+
+/// The road's table as the road's shader reads it: two rows a vec4 of uniforms, each its depth and
+/// offset codes as whole numbers; or, where a driver has too few uniforms for that (`TABLE_ROOM`, with
+/// the shader's others), a texture a row high, each row's codes in its four bytes.
+const TABLE_UNIFORMS: (&str, &str) = ("uniform vec4 table[256];", "vec4 q = table[int(r) / 2]; vec2 e2 = mod(r, 2.0) < 0.5 ? q.xy : q.zw;");
+const TABLE_TEXTURE: (&str, &str) =
+    ("", "vec4 e = floor(texture2D(tex0, vec2((r + 0.5) / rows.z, 0.5)) * 255.0 + 0.5); vec2 e2 = vec2(e.r * 256.0 + e.g, e.b * 256.0 + e.a);");
+const TABLE_ROOM: i32 = 256 + 64;
+const _: () = assert!(ROWS == 2 * 256, "TABLE_UNIFORMS holds two rows a vec4");
 
 fn row_height() -> f64 {
     (CANVAS.1 - ROWS_TOP) / ROWS as f64
@@ -287,6 +308,16 @@ impl Course {
         self.pieces[i]
     }
 
+    /// At distance s along the road: the curvature alone, as `at` has it.
+    fn curvature(&mut self, s: f64) -> f64 {
+        let s = s.max(0.0);
+        let i = (s / PIECE).floor() as usize;
+        let from = if i == 0 { 0.0 } else { self.piece(i - 1).0 };
+        let to = self.piece(i).0;
+        let tau = s - i as f64 * PIECE;
+        if tau >= EASE { to } else { from + (to - from) * smooth(tau / EASE) }
+    }
+
     /// At distance s along the road: the curvature, and the backdrop's turn.
     fn at(&mut self, s: f64) -> (f64, f64) {
         let s = s.max(0.0);
@@ -403,21 +434,81 @@ impl Validate for Settings {
 /// foot's place across it (a pole stands at its left).
 struct Sprite {
     surface: Option<ImageSurface>,
+    /// How it goes up, once made the pixel art the low frame shows (`Racing::art`).
+    kind: Option<Kind>,
     tex: Option<Tex>,
+    /// For a tree or a pole: its pixel art made at heights a step apart, smallest first, each with an
+    /// outline a pixel wide (`Racing::art`). Drawn from the one at or just over the height it is seen
+    /// at, it is never shrunk by much, so its outline stays whole as it comes near.
+    ladder: Vec<Rung>,
     size: (f64, f64),
     foot: f64,
+    /// For a picture of lines (a pole): where its main upright and its main crossing line start, as
+    /// parts of its width and height (`line_edges`). Each rung is laid so they start on a pixel's edge.
+    edges: Option<(f64, f64)>,
 }
 
+/// One of a sprite's sizes of pixel art: its height in the low frame's pixels, its picture and texture.
+struct Rung {
+    h: f64,
+    /// How far its picture was moved, in its pixels, to lay its lines on the pixels' edges (`edges`):
+    /// drawn as far back, so it stands where it is.
+    shift: (f64, f64),
+    surface: Option<ImageSurface>,
+    tex: Option<Tex>,
+}
+
+/// How much bigger each of a ladder's rungs is than the one before: a tree's, and a picture of lines'
+/// (a pole's). Between two rungs the lower is drawn whole, grown to the height, and the upper over it
+/// (`Racing::emit`). A picture of lines is drawn from its nearest rung alone (its edges are covered in
+/// part, `lined`): its rungs are close enough that one differs from the next by a fraction of a pixel.
+const RUNG: f64 = 1.1;
+const RUNG_LINES: f64 = 1.03;
+
 impl Sprite {
+    /// The rung to draw it from at a height of `h` low-frame pixels: the smallest at least that tall,
+    /// or the tallest; None without a ladder.
+    /// A rung's width for its height `h`, and how far its picture is moved to lay its lines on the
+    /// pixels' edges (`edges`; none without). An even width, so a picture symmetric about its middle
+    /// stays so on the pixels.
+    fn rung_size(&self, h: f64) -> (f64, (f64, f64)) {
+        let w = (h * self.size.0 / self.size.1 / 2.0).round().max(1.0) * 2.0;
+        let shift = self.edges.map_or((0.0, 0.0), |(x, y)| ((x * w).round() - x * w, (y * h).round() - y * h));
+        (w, shift)
+    }
+
+    /// The rung for a rectangle on the screen `pix` pixels to the low frame's, and the rectangle moved
+    /// back by as much as the rung's picture was moved (`Rung::shift`), `mirrored` or not.
+    fn laid(&self, r: (f64, f64, f64, f64), mirrored: bool, pix: f64) -> (Option<&Rung>, (f64, f64, f64, f64)) {
+        let rung = self.rung((r.3 - r.1).abs() / pix);
+        let Some(g) = rung.filter(|g| g.shift != (0.0, 0.0)) else { return (rung, r) };
+        let dx = (r.2 - r.0) / self.rung_size(g.h).0 * g.shift.0 * if mirrored { -1.0 } else { 1.0 };
+        let dy = (r.3 - r.1) / g.h * g.shift.1;
+        (rung, (r.0 - dx, r.1 - dy, r.2 - dx, r.3 - dy))
+    }
+
+    /// The rungs either side of height `h` and how far it is from the lower to the upper, so it grows
+    /// from one into the other rather than stepping. None without a ladder.
+    fn between(&self, h: f64) -> Option<(&Rung, &Rung, f64)> {
+        let hi = self.ladder.iter().position(|r| r.h >= h)?;
+        let (a, b) = (&self.ladder[hi.saturating_sub(1)], &self.ladder[hi]);
+        let t = if b.h > a.h { ((h - a.h) / (b.h - a.h)).clamp(0.0, 1.0) } else { 1.0 };
+        Some((a, b, t))
+    }
+
+    fn rung(&self, h: f64) -> Option<&Rung> {
+        self.ladder.iter().find(|r| r.h >= h).or(self.ladder.last())
+    }
+
     /// The SVG at `path`, drawn `tall` pixels tall (or as wide, for one wider than tall).
     fn of(path: &std::path::Path, tall: f64, foot: f64) -> Sprite {
         let size = svg_size(path).unwrap_or((100.0, 100.0));
         let k = (tall / size.1.max(size.0)).max(1e-3);
         let (w, h) = ((size.0 * k).ceil().max(1.0) as i32, (size.1 * k).ceil().max(1.0) as i32);
-        Sprite { surface: Some(svg_layer(path, w, h, k, 0.0, 0.0, None)), tex: None, size, foot }
+        Sprite { surface: Some(svg_layer(path, w, h, k, 0.0, 0.0, None)), kind: None, tex: None, ladder: vec![], size, foot, edges: None }
     }
     fn picture(surface: ImageSurface, size: (f64, f64)) -> Sprite {
-        Sprite { surface: Some(surface), tex: None, size, foot: 0.5 }
+        Sprite { surface: Some(surface), kind: None, tex: None, ladder: vec![], size, foot: 0.5, edges: None }
     }
     /// A PNG, at its own size in pixels.
     fn png(path: &std::path::Path) -> Sprite {
@@ -445,6 +536,10 @@ const SUN_HORIZON: f64 = HORIZON - 88.0;
 
 /// A pole's height, in half widths of the road where it stands.
 const POLE_TALL: f64 = 1.6;
+/// The free pixels a far pole needs between it and the one before it on its side, to be seen.
+const POLE_CLEAR: f64 = 3.0;
+/// How far a lit lamp lights its own pole, at night: its tint that far towards the lamp's colour.
+const POLE_LIT_BY: f64 = 0.6;
 
 /// The hills' rows on the canvas: their highest peak to their foot, under the ground.
 const HILLS_TOP: f64 = HORIZON - 110.0;
@@ -512,6 +607,12 @@ pub struct Racing {
     sky: Option<Option<Program>>,
     road: Option<Option<Program>>,
     crt: Option<Option<Program>>,
+    /// The CRT as it shows the fine frame, and the pass that makes the fine frame its rows (`RESOLVE`).
+    crt_fine: Option<Option<Program>>,
+    resolve: Option<Option<Program>>,
+    /// The fine frame the things that pass by are drawn into, FINE times the low frame each way, and
+    /// its rows as the CRT's beams take them; None without them (the low frame alone, then).
+    fine: Option<Option<(Tex, Tex)>>,
     /// The low frame the scene is drawn into, which the CRT shows; None without one (no grid, or a
     /// GL without render targets: then the shaders keep to the grid themselves, `grid`).
     frame: Option<Option<Tex>>,
@@ -519,6 +620,8 @@ pub struct Racing {
     /// The road's table, as a picture a row high, and its texture.
     table: ImageSurface,
     table_tex: Option<Tex>,
+    /// Whether the table goes to the road's shader as uniforms (`TABLE_UNIFORMS`), once asked.
+    table_uniforms: Option<bool>,
     t: f64,
     f: f64,
     fps: f64,
@@ -558,10 +661,14 @@ impl Racing {
             sky: None,
             road: None,
             crt: None,
+            crt_fine: None,
+            resolve: None,
+            fine: None,
             frame: None,
             grid: pix,
             table: surface(ROWS as i32, 1),
             table_tex: None,
+            table_uniforms: None,
             t: 0.0,
             f: crate::day::daytime(),
             fps: g.th.tw.fps,
@@ -600,6 +707,125 @@ impl Racing {
         v.extend(s.trees.iter().map(|c| Sprite::of(&Self::path(g, c), tall * 0.8, 0.5)));
         self.trees = start..v.len();
         self.sprites = v;
+    }
+
+    /// The sprites as the low frame shows them, once: on the grid, the car, the trees and the poles are
+    /// pixel art, made at the size they are seen in the low frame (the car exactly, the trees and poles
+    /// near), each texel a sharp pixel there. The still picture is drawn with these, as the live one is.
+    fn art(&mut self, g: &Geo) {
+        if self.sprites.iter().all(|sp| sp.kind.is_some()) {
+            return;
+        }
+        let art = self.pix > 1.0;
+        let frame_h = self.s.pixels.max(1.0);
+        let per = self.fit.0 / self.pix;
+        let k = CAR_WIDTH / self.s.car_span;
+        // each sprite made pixel art: its height there, its levels of light, whether it is leaves
+        let plans: Vec<Option<(f64, f64, bool)>> = (0..self.sprites.len())
+            .map(|i| {
+                let sp = &self.sprites[i];
+                let tall = if (CARS..CARS + VIEWS).contains(&i) {
+                    Some((sp.size.1 * k * per, 10.0, false))
+                } else if i == POLE || i == POLE_LIT {
+                    Some((POLE_TALL * scale(16.0) * per, 7.0, false))
+                } else if self.trees.contains(&i) {
+                    Some((1.1 * scale(16.0) * per, 6.0, true))
+                } else {
+                    None
+                };
+                // within what a picture can be, whatever the settings
+                tall.filter(|&(h, _, _)| art && sp.surface.is_some() && (1.0..=ART_MAX).contains(&h) && h * sp.size.0 / sp.size.1 <= ART_MAX)
+            })
+            .collect();
+        // a tree's or a pole's rungs: from a few pixels to taller than the frame, in steps of RUNG (a tree's) or RUNG_LINES (a pole's)
+        let rungs = |i: usize| -> Vec<f64> {
+            let sp = &self.sprites[i];
+            let top = (frame_h * 1.5).min(ART_MAX / (sp.size.0 / sp.size.1).max(1.0));
+            let step = if plans[i].is_some_and(|p| p.2) { RUNG } else { RUNG_LINES };
+            let mut heights = vec![];
+            let mut r = 3.0;
+            while r < top {
+                heights.push(r.round());
+                r = (r * step).max(r + 1.0);
+            }
+            heights.dedup();
+            heights
+        };
+        let laddered: Vec<(usize, Vec<f64>)> =
+            plans.iter().enumerate().filter(|&(i, p)| p.is_some() && !(CARS..CARS + VIEWS).contains(&i)).map(|(i, _)| (i, rungs(i))).collect();
+        // a picture of lines, not leaves (a pole): where its lines start, to lay each rung's on the pixels
+        for (i, _) in &laddered {
+            let leaves = plans[*i].is_some_and(|p| p.2);
+            let sp = &mut self.sprites[*i];
+            sp.edges = if leaves { None } else { sp.surface.as_ref().map(line_edges) };
+        }
+        // the rungs are the same each start: kept in the theme's cache
+        let make = || {
+            let mut all = vec![];
+            for (i, heights) in &laddered {
+                let (sp, (_, levels, leaves)) = (&self.sprites[*i], plans[*i].unwrap_or_default());
+                let Some(s) = sp.surface.as_ref() else { continue };
+                // the leaves' clusters as the pixel art at its near height has them
+                let near = plans[*i].map_or(1.0, |p| p.0);
+                let clusters = (((near * sp.size.0 / sp.size.1 / 2.0).round() * 2.0 / 2.0).floor(), (near.round() / 2.0).floor());
+                // each made from a picture at least twice its height, halved down from the SVG's as far
+                // as that allows: as fine, with a fraction of the pixels to filter
+                let mut chain = vec![s.clone()];
+                while let Some(last) = chain.last().filter(|l| l.height() >= 12) {
+                    chain.push(halved(last));
+                }
+                for &h in heights {
+                    let from = chain.iter().rev().find(|c| c.height() as f64 >= 2.0 * h).unwrap_or(s);
+                    let (w, shift) = sp.rung_size(h);
+                    all.push(pixel_art_with(
+                        from,
+                        w as i32,
+                        h as i32,
+                        levels,
+                        leaves.then_some(clusters),
+                        false,
+                        sp.edges.map(|_| (shift, near)),
+                        cairo::Filter::Good,
+                    ));
+                }
+            }
+            all
+        };
+        let files: Vec<&String> = self.s.trees.iter().chain([&self.s.pole, &self.s.pole_lit]).collect();
+        let tag = format!(
+            "{} {} {} {:?} {:?}",
+            self.pix,
+            self.fit.0,
+            frame_h,
+            laddered,
+            files.iter().map(|f| crate::svg::fnv(&std::fs::read(Self::path(g, f)).unwrap_or_default())).collect::<Vec<_>>()
+        );
+        let count: usize = laddered.iter().map(|l| l.1.len()).sum();
+        let kept =
+            g.th.dirs
+                .first()
+                .and_then(|dir| unpack_surfaces(&crate::svg::kept_bytes(&dir.join("theme.toml"), g.w, g.h, "racing-art", &tag, || pack_surfaces(&make()))));
+        let pictures = kept.filter(|p| p.len() == count).unwrap_or_else(make);
+        let mut pictures = pictures.into_iter();
+        for (i, heights) in &laddered {
+            let sp = &self.sprites[*i];
+            let ladder = heights.iter().map(|&h| Rung { h, shift: sp.rung_size(h).1, surface: pictures.next(), tex: None }).collect();
+            self.sprites[*i].ladder = ladder;
+            self.sprites[*i].surface = None;
+        }
+        for (i, plan) in plans.iter().enumerate() {
+            let sp = &mut self.sprites[i];
+            let car = (CARS..CARS + VIEWS).contains(&i);
+            sp.kind = Some(match (plan, &sp.surface) {
+                (Some((h, levels, leaves)), Some(s)) if car => {
+                    let w = (h * sp.size.0 / sp.size.1 / 2.0).round() * 2.0;
+                    sp.surface = Some(pixel_art(s, w as i32, h.round() as i32, *levels, *leaves, true));
+                    // the car is drawn at its own size on the frame's pixels: sharp
+                    Kind::Pixel
+                }
+                _ => Kind::Sprite,
+            });
+        }
     }
 
     /// The hills' silhouette, white: the SVG's, then its mirror image, so it repeats without a seam as
@@ -823,7 +1049,8 @@ impl Racing {
             dark * 0.5 * cone * smoothstep(0.0, 1.5, ahead) * (1.0 - smoothstep(25.0, 60.0, ahead))
         };
         // a thing standing at road distance `at`, `side` of the road (1 right, -1 left), `out` half
-        // widths from the centre, its picture `tall` half widths tall; hidden below a crest before it
+        // widths from the centre, its picture `tall` half widths tall, `own` how far its own lamp lights
+        // it, `show` how strongly it is seen there; hidden below a crest before it
         let stand = |items: &mut Vec<(f64, Vec<Placed>)>,
                      sprite: usize,
                      at: f64,
@@ -831,9 +1058,11 @@ impl Racing {
                      out: f64,
                      tall: f64,
                      flip: bool,
+                     own: f64,
+                     show: f64,
                      extra: &dyn Fn(f64, f64, f64, f64, f64) -> Vec<Placed>| {
             let z = at - travel;
-            if !(NEAR..=FAR).contains(&z) {
+            if z < NEAR || show <= 0.0 {
                 return;
             }
             let Some((foot_y, x, clip)) = self.ahead.at(z) else { return };
@@ -847,10 +1076,9 @@ impl Racing {
             if x0 > CANVAS.0 + 50.0 || x0 + wd < -50.0 || foot_y - h > CANVAS.1 + 50.0 || foot_y - h >= clip {
                 return;
             }
-            // far things fade in out of the haze, rather than appear
-            let a = smoothstep(FAR, FAR * 0.7, z);
+            let a = show;
             let clip_screen = self.at(0.0, clip).1;
-            let mut p = self.place(sprite, (x0, foot_y - h, x0 + wd, foot_y), mixed(tint, beam, lit(z, side * out + x)), a);
+            let mut p = self.place(sprite, (x0, foot_y - h, x0 + wd, foot_y), mixed(mixed(tint, lamp, own), beam, lit(z, side * out + x)), a);
             if flip {
                 p.st = (1.0, 0.0, 0.0, 1.0);
             }
@@ -868,6 +1096,22 @@ impl Racing {
         // (`lamp_level`)
         let spacing = self.s.pole_spacing;
         let first = ((travel + NEAR) / spacing).floor() as i64;
+        // a pole fades in out of the haze as a tree does, and only once it stands clear of the pole
+        // before it on its side by POLE_CLEAR pixels: else a flat road's far poles are a lump along it
+        let per = self.fit.0 / self.pix;
+        let foot = |i: i64| {
+            let z = i as f64 * spacing - travel;
+            let side = if i.rem_euclid(2) == 0 { 1.0 } else { -1.0 };
+            self.ahead.at(z).map(|(_, x, _)| road_x(z, side * 1.13 + x))
+        };
+        let pole_shown = |i: i64| -> f64 {
+            let z = i as f64 * spacing - travel;
+            let clear = match (foot(i), foot(i - 2)) {
+                (Some(a), Some(b)) if (i - 2) as f64 * spacing - travel >= NEAR => (a - b).abs() * per - 1.0,
+                _ => f64::INFINITY,
+            };
+            smoothstep(FAR, FAR * 0.7, z) * smoothstep(POLE_CLEAR, POLE_CLEAR + 1.0, clear)
+        };
         for i in first..=((travel + FAR) / spacing).ceil() as i64 {
             let level = lamp_level(self.seed, i, l.day, t);
             let sprite = if level > 0.3 { POLE_LIT } else { POLE };
@@ -891,7 +1135,11 @@ impl Racing {
                 }
                 v
             };
-            stand(&mut items, sprite, i as f64 * spacing, side, 1.13, POLE_TALL, side > 0.0, &glows);
+            // a lit lamp lights its own pole: else, past the headlights' reach, a dark pole is lost
+            // against the night sky, and its lamp floats with nothing under it. Seen as far as the road
+            // is, the lamps coming out of the distance with it: from where the trees stop, a lamp on
+            // the road already in view came on out of nothing
+            stand(&mut items, sprite, i as f64 * spacing, side, 1.13, POLE_TALL, side > 0.0, POLE_LIT_BY * level * dark, pole_shown(i), &glows);
         }
         // trees, by cells along the road, each of either side holding one or none
         let cell = 1.7;
@@ -908,7 +1156,9 @@ impl Racing {
                     let tall = 0.83 + 0.5 * hash(self.seed, i, 65 + salt);
                     // keep clear of the poles, at either side
                     let min = 1.55;
-                    stand(&mut items, sprite, at, side, min + 2.2 * out * out, tall, hash(self.seed, i, 66 + salt) < 0.5, &none);
+                    // far ones fade in out of the haze, rather than appear
+                    let show = smoothstep(FAR, FAR * 0.7, at - travel);
+                    stand(&mut items, sprite, at, side, min + 2.2 * out * out, tall, false, 0.0, show, &none);
                 }
             }
         }
@@ -984,19 +1234,7 @@ impl Racing {
     /// The street lamps' light on the ground, for the road's shader: the nearest lit lamps', each as
     /// (depth, place across the road under its head in half widths, strength), the rest none.
     fn pools(&self, l: &Light, travel: f64, t: f64) -> [[f32; 4]; POOLS] {
-        let dark = self.dark(l);
-        let spacing = self.s.pole_spacing;
-        let first = ((travel + NEAR - 4.0) / spacing).floor() as i64;
-        let mut lit: Vec<[f32; 4]> = (first..=((travel + FAR) / spacing).ceil() as i64)
-            .filter_map(|i| {
-                let k = lamp_level(self.seed, i, l.day, t) * dark;
-                let side = if i.rem_euclid(2) == 0 { 1.0 } else { -1.0 };
-                // under the lamp's head, out over the road from the pole at its edge
-                (k > 0.01).then_some([(i as f64 * spacing - travel) as f32, (side * (1.13 - POLE_TALL * 65.0 / 300.0)) as f32, k as f32, 0.0])
-            })
-            .collect();
-        lit.truncate(POOLS);
-        std::array::from_fn(|n| lit.get(n).copied().unwrap_or([0.0; 4]))
+        lamp_pools(self.seed, self.s.pole_spacing, l.day, self.dark(l), travel, t)
     }
 
     /// The road shader's uniforms for a moment.
@@ -1063,20 +1301,15 @@ impl Racing {
         self.ahead = walk(&mut self.course, self.seed, s);
         // the table, for the road's shader: per row, its depth (0: sky; all ones: beyond) and offset,
         // each in sixteen bits
-        let codes: Vec<(u16, u16)> = self
-            .ahead
-            .rows
-            .iter()
-            .map(|row| match *row {
-                Row::Sky => (0, 0),
-                Row::Beyond => (u16::MAX, 0),
-                Row::Road { z, x } => {
-                    (((z / 128.0 * 65533.0).round() as u16).clamp(1, 65534), (((x + 256.0) / 512.0 * 65535.0).round().clamp(0.0, 65535.0)) as u16)
-                }
-            })
-            .collect();
+        let code = |row: &Row| match *row {
+            Row::Sky => (0, 0),
+            Row::Beyond => (u16::MAX, 0),
+            Row::Road { z, x } => {
+                (((z / 128.0 * 65533.0).round() as u16).clamp(1, 65534), (((x + 256.0) / 512.0 * 65535.0).round().clamp(0.0, 65535.0)) as u16)
+            }
+        };
         if let Some(mut d) = view(&mut self.table) {
-            for (i, (zc, xc)) in codes.into_iter().enumerate() {
+            for (i, (zc, xc)) in self.ahead.rows.iter().map(code).enumerate() {
                 // in memory a pixel is B, G, R, A: the depth in R and G, the offset in B and A
                 d[i * 4..i * 4 + 4].copy_from_slice(&[(xc >> 8) as u8, (zc & 0xff) as u8, (zc >> 8) as u8, (xc & 0xff) as u8]);
             }
@@ -1115,18 +1348,25 @@ fn walk(course: &mut Course, seed: i64, s: f64) -> Ahead {
     let mut steps = vec![];
     let (mut ymin, mut prev) = (f64::INFINITY, None::<(f64, f64, f64)>);
     let (mut z, mut slope_x, mut x) = (NEAR, 0.0, 0.0);
+    let mut cell = (i64::MIN, None);
     while z < Z_END {
         let next = (z * 1.012).min(Z_END);
         if next > zc {
             // the curvature summed twice from the car on: straight on at the car
             let from = z.max(zc);
             let dz = next - from;
-            let c = course.at(s + (from + dz / 2.0 - zc)).0;
+            let c = course.curvature(s + (from + dz / 2.0 - zc));
             x += slope_x * dz + c * dz * dz / 2.0;
             slope_x += c * dz;
         }
         z = next;
-        let dh = height(seed, s + z - zc).0 - h_car - tilt * (z - zc);
+        // the hills along the walk, each worked out once: the steps are many to a hill
+        let at = s + z - zc;
+        let k = (at / HILL_CELL).floor() as i64;
+        if cell.0 != k {
+            cell = (k, hill(seed, k));
+        }
+        let dh = height_only(at, cell.1) - h_car - tilt * (z - zc);
         let y = row_of(z, dh);
         if y < ymin {
             // every row any of whose height the road reaches: a row half in it is road, not a gap of sky
@@ -1178,6 +1418,25 @@ fn lamp_kind(seed: i64, i: i64) -> Lamp {
         r if r < 0.20 => Lamp::AlwaysOn,
         _ => Lamp::Normal,
     }
+}
+
+/// The street lamps' light on the road at `travel` (each one's distance ahead, its side, its brightness):
+/// the lamps `spacing` apart, `dark` how dark it is, `day` the daylight, `t` the scene's clock.
+fn lamp_pools(seed: i64, spacing: f64, day: f64, dark: f64, travel: f64, t: f64) -> [[f32; 4]; POOLS] {
+    // the lamps over a stretch of road that holds at most POOLS of them, each one's light fading in
+    // over the far end of it: cut off there, a pool flashed on where the road ahead rises into view
+    let (near, far) = (NEAR - 4.0, (NEAR - 4.0 + (POOLS - 1) as f64 * spacing).min(FAR));
+    let first = ((travel + near) / spacing).floor() as i64;
+    let lit: Vec<[f32; 4]> = (first..first + POOLS as i64)
+        .filter_map(|i| {
+            let z = i as f64 * spacing - travel;
+            let k = lamp_level(seed, i, day, t) * dark * (1.0 - smoothstep(far - 2.0 * spacing, far, z));
+            let side = if i.rem_euclid(2) == 0 { 1.0 } else { -1.0 };
+            // under the lamp's head, out over the road from the pole at its edge
+            (k > 0.01 && z <= far).then_some([z as f32, (side * (1.13 - POLE_TALL * 65.0 / 300.0)) as f32, k as f32, 0.0])
+        })
+        .collect();
+    std::array::from_fn(|n| lit.get(n).copied().unwrap_or([0.0; 4]))
 }
 
 /// Lamp i's light now, 0 to 1, at daylight `day` and time t.
@@ -1285,7 +1544,7 @@ void main() {
 const ROAD_SHADER: &str = "uniform vec4 view; uniform vec4 motion; uniform vec3 grass; uniform vec3 grass2;
 uniform vec3 asphalt; uniform vec3 curb; uniform vec3 cream; uniform vec3 dash; uniform vec3 haze;
 uniform vec3 tint; uniform vec3 beam; uniform vec4 sheen; uniform vec3 glow; uniform vec4 rows;
-uniform vec3 lampc; uniform vec4 pools[POOLS];
+uniform vec3 lampc; uniform vec4 pools[POOLS]; TABLE_DECL
 float rise(float x, float duty) { return floor(x) * duty + min(fract(x), duty); }
 float pulse(float p, float duty, float fw) {
   fw = max(fw, 1e-4);
@@ -1298,8 +1557,8 @@ vec4 shade(vec2 p, float ps) {
   vec2 c = (p - view.yz) / view.x;
   float r = floor((c.y - rows.x) / rows.y);
   if (r < 0.0 || r >= rows.z) return vec4(0.0);
-  vec4 e = floor(texture2D(tex0, vec2((r + 0.5) / rows.z, 0.5)) * 255.0 + 0.5);
-  float zc = e.r * 256.0 + e.g;
+  TABLE_READ
+  float zc = e2.x;
   // sky only above the horizon: under it, whatever the table says, it is the land beyond the road
   if (zc < 0.5) { if (c.y < rows.w) return vec4(0.0); zc = 65535.0; }
   vec3 col;
@@ -1307,7 +1566,7 @@ vec4 shade(vec2 p, float ps) {
     col = mix(mix(grass, grass2, 0.5) * tint, haze, motion.w);
   } else {
     float z = zc / 65533.0 * 128.0;
-    float off = (e.b * 256.0 + e.a) / 65535.0 * 512.0 - 256.0;
+    float off = e2.y / 65535.0 * 512.0 - 256.0;
     float q = clamp(FOCAL / z / (900.0 - HORIZON), 0.0, 1.5);
     float d = (c.x - VANISH) * z / (FOCAL * ROAD_HALF) + VIEW - off;
     float s = z + motion.x;
@@ -1375,9 +1634,7 @@ void main() {
 /// rows above and below lending their light, then the phosphors' mask, a stretched VGA shadow mask
 /// (`mask.x` dark, `mask.y` light), and the light the mask and the rows took made back (`mask.z`). In
 /// a near linear light (squared), back by the square root.
-const CRT: &str = "uniform vec4 src; uniform vec4 mask;
-float gaus(float p, float s) { return exp2(s * p * p); }
-vec3 fetch(vec2 pos, vec2 off) {
+const CRT: &str = "vec3 fetch(vec2 pos, vec2 off) {
   vec2 p = (floor(pos * src.xy + off) + 0.5) / src.xy;
   vec3 c = texture2D(tex0, vec2(p.x, 1.0 - p.y)).rgb;
   return c * c;
@@ -1397,6 +1654,44 @@ float scan(vec2 pos, float off) { return gaus(dist(pos).y + off, src.z); }
 vec3 tri(vec2 pos) {
   return horz3(pos, -1.0) * scan(pos, -1.0) + horz3(pos, 0.0) * scan(pos, 0.0) + horz3(pos, 1.0) * scan(pos, 1.0);
 }
+void main() {
+  vec3 c = tri(uv) * shadow(floor(gl_FragCoord.xy)) * mask.z;
+  gl_FragColor = vec4(sqrt(max(c, 0.0)), 1.0);
+}";
+
+/// How much finer than the low frame the fine frame is, each way (`Racing::fine`): even, for RESOLVE.
+const FINE: i32 = 4;
+/// The beam's spread along a row (crt-lottes's hardPix), over the fine frame's smooth signal: as sharp
+/// as the CRT's -3 over whole pixels (four fifths of a pixel's light its own at its middle).
+const HARD_PIX: f64 = -4.75;
+
+/// The fine frame's rows, as the CRT's beams take them (`Racing::fine`): each of the low frame's rows
+/// the mean of its FINE fine ones (two at a time, between texels), spread along the row as the beam
+/// spreads it, in linear light (`src`: the fine frame's size, the spread). Read smooth along the row.
+const RESOLVE: &str = "uniform vec4 src;
+void main() {
+  float col = (floor(uv.x * src.x) + 0.5) / src.x;
+  float row = floor(uv.y * src.y / FINE) * FINE;
+  vec3 sum = vec3(0.0);
+  float ws = 0.0;
+  for (int j = -REACH; j <= REACH; j++) {
+    float d = float(j) / FINE;
+    float w = exp2(src.z * d * d);
+    float x = col + float(j) / src.x;
+    vec3 c = vec3(0.0);
+    for (int k = 1; k < int(FINE); k += 2) {
+      vec3 t = texture2D(tex0, vec2(x, 1.0 - (row + float(k)) / src.y)).rgb;
+      c += t * t;
+    }
+    sum += w * c;
+    ws += w;
+  }
+  gl_FragColor = vec4(sqrt(sum / (ws * FINE * 0.5)), 1.0);
+}";
+
+/// What both CRTs share: the beam's profile (`gaus`) and the phosphors' mask (`shadow`).
+const CRT_COMMON: &str = "uniform vec4 src; uniform vec4 mask;
+float gaus(float p, float s) { return exp2(s * p * p); }
 vec3 shadow(vec2 p) {
   vec3 m = vec3(mask.x);
   p.x += p.y * 3.0;
@@ -1404,8 +1699,19 @@ vec3 shadow(vec2 p) {
   if (f < 0.333) m.r = mask.y; else if (f < 0.666) m.g = mask.y; else m.b = mask.y;
   return m;
 }
+";
+
+/// The CRT over the fine frame's rows (`RESOLVE`): as `CRT`, each row read smooth along it, already
+/// spread as the beam spreads it.
+const CRT_FINE: &str = "vec3 row(vec2 pos, float off) {
+  float r = (floor(pos.y * src.y + off) + 0.5) / src.y;
+  vec3 c = texture2D(tex0, vec2(pos.x, 1.0 - r)).rgb;
+  return c * c;
+}
+float scan(vec2 pos, float off) { float d = -((pos.y * src.y - floor(pos.y * src.y)) - 0.5); return gaus(d + off, src.z); }
 void main() {
-  vec3 c = tri(uv) * shadow(floor(gl_FragCoord.xy)) * mask.z;
+  vec3 c = row(uv, -1.0) * scan(uv, -1.0) + row(uv, 0.0) * scan(uv, 0.0) + row(uv, 1.0) * scan(uv, 1.0);
+  c *= shadow(floor(gl_FragCoord.xy)) * mask.z;
   gl_FragColor = vec4(sqrt(max(c, 0.0)), 1.0);
 }";
 
@@ -1429,34 +1735,15 @@ impl Part for Racing {
     }
     fn textures(&mut self, g: &Geo, _s: &Shared, up: &mut Uploads) {
         self.pictures(g);
-        // on the grid, the car, the trees and the poles are pixel art: made at the size they are seen in
-        // the low frame (the car exactly, the trees and poles near), each texel a sharp pixel there
-        let art = self.pix > 1.0;
-        let per = self.fit.0 / self.pix;
-        let k = CAR_WIDTH / self.s.car_span;
-        for (i, sp) in self.sprites.iter_mut().enumerate() {
-            let Some(mut s) = sp.surface.take() else { continue };
-            let tall = if (CARS..CARS + VIEWS).contains(&i) {
-                Some((sp.size.1 * k * per, 10.0, false))
-            } else if i == POLE || i == POLE_LIT {
-                Some((POLE_TALL * scale(16.0) * per, 7.0, false))
-            } else if self.trees.contains(&i) {
-                Some((1.1 * scale(16.0) * per, 6.0, true))
-            } else {
-                None
-            };
-            let kind = match tall {
-                Some((h, levels, leaves)) if art => {
-                    // an even width, so a picture symmetric about its middle stays so on the pixels
-                    let w = (h * sp.size.0 / sp.size.1 / 2.0).round() * 2.0;
-                    s = pixel_art(&s, w as i32, h.round() as i32, levels, leaves, (CARS..CARS + VIEWS).contains(&i));
-                    // the car is drawn at its own size on the frame's pixels: sharp; the trees and poles
-                    // at every size and between pixels: filtered, so they glide
-                    if (CARS..CARS + VIEWS).contains(&i) { Kind::Pixel } else { Kind::Sprite }
-                }
-                _ => Kind::Sprite,
-            };
-            sp.tex = Some(up.add(s, kind));
+        self.art(g);
+        for sp in self.sprites.iter_mut() {
+            // a rung is shrunk by little or not at all: filtered, without mipmaps; all of them on a page
+            // or two, so the trees and poles go to the screen in a draw or two
+            for r in sp.ladder.iter_mut() {
+                r.tex = r.surface.take().map(|s| up.add_packed(s));
+            }
+            let Some(s) = sp.surface.take() else { continue };
+            sp.tex = Some(up.add(s, sp.kind.unwrap_or(Kind::Sprite)));
         }
         self.table_tex = Some(up.add(surface(ROWS as i32, 1), Kind::Label));
     }
@@ -1476,7 +1763,12 @@ impl Part for Racing {
         let sky = self.sky_look(&l);
         let (w, h) = (g.w as f64, g.h as f64);
         let pix = self.pix;
-        let frame = *self.frame.get_or_insert_with(|| if pix > 1.0 { gfx.render_target((w / pix).ceil() as i32, (h / pix).ceil() as i32) } else { None });
+        let frame =
+            *self.frame.get_or_insert_with(|| if pix > 1.0 { gfx.render_target((w / pix).ceil() as i32, (h / pix).ceil() as i32, false) } else { None });
+        let fine = *self.fine.get_or_insert_with(|| {
+            let (fw, fh) = gfx.size(frame?);
+            Some((gfx.render_target(fw * FINE, fh * FINE, true)?, gfx.render_target(fw * FINE, fh, true)?))
+        });
         self.grid = if frame.is_some() { 1.0 } else { pix };
         gfx.target(frame);
         let mut u = self.sky_uniforms(&l, &sky);
@@ -1489,7 +1781,17 @@ impl Part for Racing {
         let mut back = vec![];
         self.back(&l, &sky, self.t, &mut back);
         self.emit(gfx, &back);
-        if let Some(tex) = self.table_tex {
+        // the table as uniforms where the driver has room for them, else as a texture
+        let as_uniforms = *self.table_uniforms.get_or_insert_with(|| gfx.uniform_room() >= TABLE_ROOM);
+        let mut tablef = vec![];
+        if as_uniforms {
+            let _ = self.table.with_data(|d| {
+                for p in d[..ROWS * 4].as_chunks::<4>().0 {
+                    tablef.push((p[2] as u32 * 256 + p[1] as u32) as f32);
+                    tablef.push((p[0] as u32 * 256 + p[3] as u32) as f32);
+                }
+            });
+        } else if let Some(tex) = self.table_tex {
             gfx.replace(tex, &self.table, Kind::Label);
         }
         let top = self.at(0.0, ROWS_TOP).1.floor().max(0.0);
@@ -1507,9 +1809,11 @@ impl Part for Racing {
                 .replace("NOSE", &format!("{NOSE:.3}"))
                 .replace("LAMPS", &format!("{LAMPS:.4}"))
                 .replace("POOLS", &POOLS.to_string())
-                .replace("VIEW", &format!("{VIEW:.4}"));
+                .replace("VIEW", &format!("{VIEW:.4}"))
+                .replace("TABLE_DECL", if as_uniforms { TABLE_UNIFORMS.0 } else { TABLE_TEXTURE.0 })
+                .replace("TABLE_READ", if as_uniforms { TABLE_UNIFORMS.1 } else { TABLE_TEXTURE.1 });
             let mut p = Self::compile(gfx, &src, &ROAD_UNIFORMS)?;
-            p.at.push(gfx.uniform(p.prog, "tex0"));
+            p.at.push(gfx.uniform(p.prog, if as_uniforms { "table" } else { "tex0" }));
             p.at.push(gfx.uniform(p.prog, "lampc"));
             p.at.extend((0..POOLS).map(|k| gfx.uniform(p.prog, &format!("pools[{k}]"))));
             Some(p)
@@ -1519,16 +1823,53 @@ impl Part for Racing {
             let n = ROAD_UNIFORMS.len();
             all.push((p.at[n + 1], 3, [lampc.0 as f32, lampc.1 as f32, lampc.2 as f32, 0.0]));
             all.extend(p.at[n + 2..].iter().zip(pools).map(|(&at, v)| (at, 4, v)));
-            let sampler = p.at[ROAD_UNIFORMS.len()];
-            gfx.custom(p.prog, &all, &[(sampler, tex)], 0.0, top, w, h, Blend::Premultiplied);
+            let at = p.at[ROAD_UNIFORMS.len()];
+            if as_uniforms {
+                gfx.uniform_array(at, tablef);
+                gfx.custom(p.prog, &all, &[], 0.0, top, w, h, Blend::Premultiplied);
+            } else {
+                gfx.custom(p.prog, &all, &[(at, tex)], 0.0, top, w, h, Blend::Premultiplied);
+            }
+        }
+        // what passes by goes into the fine frame, over the low one made FINE times as fine, so it
+        // moves smoothly: on a tube's rows a thing between them lights both, and along a row the beam
+        // is a smooth signal, not pixels; on the low frame it went from pixel to pixel
+        if let (Some(f), Some((fine_tex, _))) = (frame, fine) {
+            gfx.target(Some(fine_tex));
+            let q: Vec<f32> = image_quad(0.0, 0.0, w, h, (1.0, 1.0, 1.0), 1.0, (0.0, 1.0, 1.0, 0.0)).iter().map(|&v| v as f32).collect();
+            gfx.draw(Some(f), &q, Blend::Opaque);
         }
         let mut front = vec![];
         self.front(&l, travel, self.t, &mut front);
         self.emit(gfx, &front);
-        if let Some(f) = frame {
+        if let (Some(_), Some((fine_tex, rows))) = (frame, fine) {
+            let (fw, fh) = gfx.size(fine_tex);
+            gfx.target(Some(rows));
+            let resolve = self.resolve.get_or_insert_with(|| {
+                let src = RESOLVE.replace("REACH", &(FINE * 3 / 2).to_string()).replace("FINE", &format!("{FINE}.0"));
+                let mut p = Self::compile(gfx, &src, &CRT_UNIFORMS[..1])?;
+                p.at.push(gfx.uniform(p.prog, "tex0"));
+                Some(p)
+            });
+            if let Some(p) = resolve {
+                gfx.custom(p.prog, &[(p.at[0], 4, [fw as f32, fh as f32, HARD_PIX as f32, 0.0])], &[(p.at[1], fine_tex)], 0.0, 0.0, w, h, Blend::Opaque);
+            }
+            gfx.target(None);
+            let crt = self.crt_fine.get_or_insert_with(|| {
+                let mut p = Self::compile(gfx, &format!("{CRT_COMMON}{CRT_FINE}"), &CRT_UNIFORMS[..3])?;
+                p.at.push(gfx.uniform(p.prog, "tex0"));
+                Some(p)
+            });
+            if let Some(p) = crt {
+                let (rw, rh) = gfx.size(rows);
+                let values = [[rw as f32, rh as f32, -8.0, 0.0], [0.65, 1.35, 1.7, 0.0], [0.0, 0.0, w as f32, h as f32]];
+                let all: Vec<_> = p.at.iter().zip(values).map(|(&at, v)| (at, 4, v)).collect();
+                gfx.custom(p.prog, &all, &[(p.at[3], rows)], 0.0, 0.0, w, h, Blend::Opaque);
+            }
+        } else if let Some(f) = frame {
             gfx.target(None);
             let crt = self.crt.get_or_insert_with(|| {
-                let mut p = Self::compile(gfx, CRT, &CRT_UNIFORMS[..3])?;
+                let mut p = Self::compile(gfx, &format!("{CRT_COMMON}{CRT}"), &CRT_UNIFORMS[..3])?;
                 p.at.push(gfx.uniform(p.prog, "tex0"));
                 Some(p)
             });
@@ -1544,39 +1885,150 @@ impl Part for Racing {
     }
     fn rest(&mut self, g: &Geo, c: &Context, _s: &mut Shared) {
         self.pictures(g);
+        self.art(g);
         self.advance();
         let (l, travel, _) = self.moment();
         let sky = self.sky_look(&l);
-        self.paint_sky(g, c, &l, &sky);
-        let mut back = vec![];
-        self.back(&l, &sky, self.t, &mut back);
-        self.paint_placed(c, &back);
-        self.paint_road(g, c, &l, &sky, travel);
-        let mut front = vec![];
-        self.front(&l, travel, self.t, &mut front);
-        self.paint_placed(c, &front);
-        if self.pix > 1.0
-            && let Ok(mut target) = ImageSurface::try_from(c.target())
+        let paint = |c: &Context| {
+            self.paint_sky(g, c, &l, &sky);
+            let mut back = vec![];
+            self.back(&l, &sky, self.t, &mut back);
+            self.paint_placed(c, &back);
+            self.paint_road(g, c, &l, &sky, travel);
+            let mut front = vec![];
+            self.front(&l, travel, self.t, &mut front);
+            self.paint_placed(c, &front);
+        };
+        if self.pix <= 1.0 {
+            paint(c);
+            return;
+        }
+        // into the low frame, as the live picture is, then onto the screen as the CRT shows it
+        // a grid coarser than the screen is one beam over all of it
+        let pix = (self.pix as usize).clamp(1, g.h.max(1) as usize);
+        let low = surface((g.w as usize).div_ceil(pix) as i32, (g.h as usize).div_ceil(pix) as i32);
         {
-            c.target().flush();
-            pixelate(&mut target, self.pix as usize, self.levels);
-            target.mark_dirty();
+            let lc = ctx(&low);
+            lc.scale(1.0 / pix as f64, 1.0 / pix as f64);
+            paint(&lc);
+        }
+        let mut screen = surface(g.w, g.h);
+        beams(&low, &mut screen, pix);
+        if c.set_source_surface(&screen, 0.0, 0.0).is_ok() {
+            let _ = c.paint();
         }
     }
 }
 
-/// A picture as the CRT shows the low frame, near enough for a still: each pixel of the grid the colour
-/// at its middle, its rows a beam, bright at their middle and dark between, as bright overall.
-fn pixelate(s: &mut ImageSurface, pix: usize, _levels: f64) {
+/// A pixel of a picture of lines (`pixel_art_with`), from its straight colours `px`: its colour in
+/// `levels`, and there as much as the picture covers it, over an outline as much as its fullest
+/// neighbour covers its own, `edge` of it. A pixel either there or not made a line one, two or three
+/// pixels wide by where it fell, so its width stepped as it grew; covered in part, it grows smoothly.
+fn lined(px: &[[f64; 4]], w: usize, h: usize, x: i64, y: i64, levels: f64, edge: f64) -> [f64; 4] {
+    let at = |x: i64, y: i64| (x >= 0 && y >= 0 && (x as usize) < w && (y as usize) < h).then(|| px[y as usize * w + x as usize]);
+    let [r, g, b, a] = at(x, y).unwrap_or_default();
+    let l = 0.299 * r + 0.587 * g + 0.114 * b;
+    let f = if l > 1e-6 { ((l * levels).round() / levels).clamp(0.0, 1.0) / l } else { 0.0 };
+    let c = [(r * f).min(1.0), (g * f).min(1.0), (b * f).min(1.0)];
+    let n = [(0, -1), (-1, 0), (1, 0), (0, 1)].iter().filter_map(|(dx, dy)| at(x + dx, y + dy)).fold([0.0; 4], |m, p| if p[3] > m[3] { p } else { m });
+    let o = n[3] * edge * (1.0 - a);
+    let total = a + o;
+    if total <= 0.0 {
+        return [0.0; 4];
+    }
+    // straight colour of the shape over the outline (the neighbour's colour, deep)
+    std::array::from_fn(|j| if j == 3 { total } else { (c[j] * a + n[j] * 0.3 * o) / total })
+}
+
+/// Where a picture's main lines start, as parts of its width and height: the left edge of its fullest
+/// column's line and the top edge of its fullest row's, each where its coverage falls under half.
+fn line_edges(s: &ImageSurface) -> (f64, f64) {
+    let (w, h) = (s.width().max(1) as usize, s.height().max(1) as usize);
+    let (mut cols, mut rows) = (vec![0.0f64; w], vec![0.0f64; h]);
+    let s = s.clone();
+    let _ = s.with_data(|d| {
+        let stride = d.len() / h;
+        for y in 0..h {
+            for x in 0..w {
+                let a = d[y * stride + x * 4 + 3] as f64 / 255.0;
+                cols[x] += a;
+                rows[y] += a;
+            }
+        }
+    });
+    // from the fullest, back over the line's full ones; the one before it partly covered
+    let start = |v: &[f64]| {
+        let (top, peak) = v.iter().enumerate().fold((0, 0.0), |b, (i, &x)| if x > b.1 { (i, x) } else { b });
+        if peak <= 0.0 {
+            return 0.0;
+        }
+        let mut i = top;
+        while i > 0 && v[i - 1] >= 0.5 * peak {
+            i -= 1;
+        }
+        let part = if i > 0 { (v[i - 1] / peak).min(1.0) } else { 0.0 };
+        (i as f64 - part) / v.len() as f64
+    };
+    (start(&cols), start(&rows))
+}
+
+/// A picture at half its size, each pixel the mean of four.
+fn halved(s: &ImageSurface) -> ImageSurface {
+    let (w, h) = ((s.width() / 2).max(1), (s.height() / 2).max(1));
+    let out = surface(w, h);
+    {
+        let c = ctx(&out);
+        c.scale(w as f64 / s.width().max(1) as f64, h as f64 / s.height().max(1) as f64);
+        if c.set_source_surface(s, 0.0, 0.0).is_ok() {
+            c.source().set_filter(cairo::Filter::Good);
+            let _ = c.paint();
+        }
+    }
+    out
+}
+
+/// The largest a sprite's pixel art is made, in the low frame's pixels.
+const ART_MAX: f64 = 4096.0;
+
+/// A sprite's picture tinted as the GPU tints it: each texel (premultiplied) times the tint, which goes
+/// from `top` (colour, alpha) at row `v0` of the picture to `foot` at row `v1` (fractions of its height).
+fn tinted(s: &ImageSurface, top: (Rgb, f64), foot: (Rgb, f64), v0: f64, v1: f64) -> ImageSurface {
+    let (w, h) = (s.width(), s.height());
+    let mut out = surface(w, h);
+    let (stride, ostride) = (s.stride() as usize, out.stride() as usize);
+    let mut src = vec![];
+    let _ = s.with_data(|d| src = d.to_vec());
+    let pre = |(c, a): (Rgb, f64)| [c.2 * a, c.1 * a, c.0 * a, a];
+    let (t, f) = (pre(top), pre(foot));
+    if let Some(mut d) = view(&mut out) {
+        for y in 0..h as usize {
+            let k = (((y as f64 + 0.5) / h as f64 - v0) / (v1 - v0)).clamp(0.0, 1.0);
+            let tint: [f64; 4] = std::array::from_fn(|i| t[i] + (f[i] - t[i]) * k);
+            for x in 0..w as usize {
+                let (i, o) = (y * stride + x * 4, y * ostride + x * 4);
+                for ch in 0..4 {
+                    d[o + ch] = (src[i + ch] as f64 * tint[ch]).round().clamp(0.0, 255.0) as u8;
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The low frame as the CRT shows it, near enough for a still: each of its pixels `pix` square on the
+/// screen, its rows a beam, bright at their middle and dark between, as bright overall.
+fn beams(low: &ImageSurface, s: &mut ImageSurface, pix: usize) {
     let (w, h, stride) = (s.width() as usize, s.height() as usize, s.stride() as usize);
+    let lstride = low.stride() as usize;
+    let mut src = vec![];
+    let _ = low.with_data(|d| src = d.to_vec());
     let Some(mut d) = view(s) else { return };
     let beam: Vec<f64> = (0..pix).map(|y| (-8.0 * ((y as f64 + 0.5) / pix as f64 - 0.5).powi(2)).exp2()).collect();
     let mean = beam.iter().sum::<f64>() / pix as f64;
     for cy in 0..h.div_ceil(pix) {
         for cx in 0..w.div_ceil(pix) {
-            let (mx, my) = ((cx * pix + pix / 2).min(w - 1), (cy * pix + pix / 2).min(h - 1));
-            let at = my * stride + mx * 4;
-            let px = [d[at], d[at + 1], d[at + 2], d[at + 3]];
+            let at = cy * lstride + cx * 4;
+            let px = [src[at], src[at + 1], src[at + 2], src[at + 3]];
             for y in cy * pix..((cy + 1) * pix).min(h) {
                 let k = beam[y - cy * pix] / mean;
                 let row = [0, 1, 2].map(|i| (px[i] as f64 * k).round().min(255.0) as u8);
@@ -1592,13 +2044,34 @@ fn pixelate(s: &mut ImageSurface, pix: usize, _levels: f64) {
 /// (its edges there a step lighter, at the bottom right a step darker), its light in `levels` steps,
 /// a dark outline round it; leaves in clusters of lighter and darker pixels.
 fn pixel_art(src: &ImageSurface, w: i32, h: i32, levels: f64, leaves: bool, car: bool) -> ImageSurface {
+    let clusters = ((w.max(1) / 2) as f64, (h.max(1) / 2) as f64);
+    pixel_art_with(src, w, h, levels, leaves.then_some(clusters), car, None, cairo::Filter::Best)
+}
+
+/// As `pixel_art`, drawn down with `filter` (Good is as fine from a picture at most twice the size), its
+/// leaves' clusters `leaves` across and down: the same clusters, in the same places, at every size.
+/// `lines`: a picture of lines (a pole), moved by that many pixels (`Sprite::rung_size`), each pixel as
+/// much of it as the picture covers there (`lined`), and the height its art is made for.
+fn pixel_art_with(
+    src: &ImageSurface,
+    w: i32,
+    h: i32,
+    levels: f64,
+    leaves: Option<(f64, f64)>,
+    car: bool,
+    lines: Option<((f64, f64), f64)>,
+    filter: cairo::Filter,
+) -> ImageSurface {
     let (w, h) = (w.max(1), h.max(1));
     let mut small = surface(w, h);
     {
         let c = ctx(&small);
+        if let Some(((dx, dy), _)) = lines {
+            c.translate(dx, dy);
+        }
         c.scale(w as f64 / src.width().max(1) as f64, h as f64 / src.height().max(1) as f64);
         if c.set_source_surface(src, 0.0, 0.0).is_ok() {
-            c.source().set_filter(cairo::Filter::Best);
+            c.source().set_filter(filter);
             let _ = c.paint();
         }
     }
@@ -1613,14 +2086,27 @@ fn pixel_art(src: &ImageSurface, w: i32, h: i32, levels: f64, leaves: bool, car:
             [un(d[at + 2]), un(d[at + 1]), un(d[at]), a]
         })
         .collect();
-    let solid = |x: i64, y: i64| x >= 0 && y >= 0 && (x as usize) < wu && (y as usize) < hu && px[y as usize * wu + x as usize][3] >= 0.5;
+    // a pixel is there where it is half covered
+    let there: Vec<bool> = px.iter().map(|p| p[3] >= 0.5).collect();
+    let solid = |x: i64, y: i64| x >= 0 && y >= 0 && (x as usize) < wu && (y as usize) < hu && there[y as usize * wu + x as usize];
+    // the outline, a pixel thick; about a picture of lines, as thick for its size as at the height its
+    // art is made for (`near`), a pixel there: a pixel at every size made a far pole a post, fattest
+    // for its size halfway, that slimmed as it neared
+    let edge = lines.map_or(1.0, |(_, near)| (h as f64 / near.max(1.0)).min(1.0));
     for y in 0..hu as i64 {
         for x in 0..wu as i64 {
             let i = y as usize * wu + x as usize;
-            let out = if solid(x, y) {
+            let out = if lines.is_some() {
+                lined(&px, wu, hu, x, y, levels, edge)
+            } else if solid(x, y) {
                 let mut k = 1.0;
-                if leaves {
-                    k *= 0.8 + 0.4 * hash(0, (x / 2) * 7919 + (y / 2) * 104_729, 91);
+                // leaves: here and there a cluster a level darker, the same at every size of the picture,
+                // whatever light the cluster's pixels have there
+                let mut step = 0.0;
+                if let Some((across, down)) = leaves {
+                    let cell = |p: i64, n: i32, k: f64| ((p as f64 + 0.5) / n as f64 * k).floor() as i64;
+                    let v = hash(0, cell(x, w, across) * 7919 + cell(y, h, down) * 104_729, 91);
+                    step = if v < 0.12 { -1.0 } else { 0.0 };
                 }
                 // lit from straight above, shaded below: the same on both sides
                 if !solid(x, y - 1) {
@@ -1630,7 +2116,7 @@ fn pixel_art(src: &ImageSurface, w: i32, h: i32, levels: f64, leaves: bool, car:
                 }
                 let [r, g, b, _] = px[i];
                 let l = 0.299 * r + 0.587 * g + 0.114 * b;
-                let lq = ((l * k * levels).round() / levels).clamp(0.0, 1.0);
+                let lq = (((l * k * levels).round() + step) / levels).clamp(0.0, 1.0);
                 let f = if l > 1e-6 { lq / l } else { 0.0 };
                 [(r * f).min(1.0), (g * f).min(1.0), (b * f).min(1.0), 1.0]
             } else if let Some(n) = [(0, -1), (-1, 0), (1, 0), (0, 1)]
@@ -1640,7 +2126,7 @@ fn pixel_art(src: &ImageSurface, w: i32, h: i32, levels: f64, leaves: bool, car:
                 .reduce(|a, b| if a[0] + a[1] + a[2] < b[0] + b[1] + b[2] { a } else { b })
             {
                 // the outline: the darkest neighbour's colour, deep
-                [n[0] * 0.3, n[1] * 0.3, n[2] * 0.3, 1.0]
+                [n[0] * 0.3, n[1] * 0.3, n[2] * 0.3, edge]
             } else {
                 [0.0; 4]
             };
@@ -1731,7 +2217,26 @@ impl Racing {
         let snap = |v: f64, g: f64| (v / g).round() * g;
         let grid = if self.frame.flatten().is_some() { self.pix } else { 1.0 };
         for s in placed {
-            let Some(tex) = self.sprites[s.sprite].tex else { continue };
+            let sp = &self.sprites[s.sprite];
+            // a laddered picture between two of its rungs: the lower whole, the upper over it as far as
+            // the height is from one to the other, so it grows from one into the next rather than
+            // stepping; each read where its picture was laid (`Rung::shift`). Else the one picture
+            let h = (s.rect.3 - s.rect.1).abs() / self.pix;
+            let layers: Vec<(Tex, (f64, f64), f64)> = match sp.between(h) {
+                // a picture of lines, covered in part where its edges fall: its rungs a few hundredths
+                // apart differ by a fraction of a pixel, so the nearest serves; drawn over one another,
+                // two rungs' part-covered edges would add up and darken as it grew
+                Some((a, b, t)) if sp.edges.is_some() => {
+                    let r = if t < 0.5 { a } else { b };
+                    r.tex.map(|tex| (tex, (r.shift.0 / sp.rung_size(r.h).0, r.shift.1 / r.h), 1.0)).into_iter().collect()
+                }
+                Some((a, b, t)) => [(a, 1.0), (b, t)]
+                    .into_iter()
+                    .filter(|&(_, k)| k > 0.0)
+                    .filter_map(|(r, k)| Some((r.tex?, (r.shift.0 / sp.rung_size(r.h).0, r.shift.1 / r.h), k)))
+                    .collect(),
+                None => sp.rung(h).map_or(sp.tex, |r| r.tex).map(|t| (t, (0.0, 0.0), 1.0)).into_iter().collect(),
+            };
             // the car keeps to the low frame's pixels, as an old racer's did; everything else moves
             // smoothly between them, filtered into the frame, so it glides rather than steps
             let g = if (CARS..CARS + VIEWS).contains(&s.sprite) { grid } else { 1.0 };
@@ -1753,49 +2258,63 @@ impl Racing {
                 std::mem::swap(&mut v0, &mut v1);
                 std::mem::swap(&mut top, &mut foot);
             }
-            let mut q = image_quad(x0, ya, x1, yb, top.0, top.1, (u0, v0, u1, v1));
-            for corner in [2usize, 3] {
-                q[corner * 8 + 2..corner * 8 + 6].copy_from_slice(&[foot.0.0 * foot.1, foot.0.1 * foot.1, foot.0.2 * foot.1, foot.1]);
+            let blend = match s.mode {
+                Mode::Solid => Blend::Premultiplied,
+                Mode::Light(b) => b,
+            };
+            for (tex, (du, dv), k) in layers {
+                let mut q = image_quad(x0, ya, x1, yb, top.0, top.1 * k, (u0 + du, v0 + dv, u1 + du, v1 + dv));
+                for corner in [2usize, 3] {
+                    q[corner * 8 + 2..corner * 8 + 6].copy_from_slice(&[foot.0.0 * foot.1 * k, foot.0.1 * foot.1 * k, foot.0.2 * foot.1 * k, foot.1 * k]);
+                }
+                let data: Vec<f32> = q.iter().map(|&v| v as f32).collect();
+                gfx.draw(Some(tex), &data, blend);
             }
-            let data: Vec<f32> = q.iter().map(|&v| v as f32).collect();
-            gfx.draw(
-                Some(tex),
-                &data,
-                match s.mode {
-                    Mode::Solid => Blend::Premultiplied,
-                    Mode::Light(b) => b,
-                },
-            );
         }
     }
 
-    /// Sprites drawn with cairo, for the still picture.
+    /// Sprites drawn with cairo, for the still picture, as `emit` has the GPU draw them: each texel its
+    /// colour times the tint, from the tint at its top to the one at its foot; the car on the low
+    /// frame's pixels, sharp.
     fn paint_placed(&self, c: &Context, placed: &[Placed]) {
+        let snap = |v: f64, g: f64| (v / g).round() * g;
         for p in placed {
-            let Some(s) = self.sprites[p.sprite].surface.as_ref() else { continue };
+            let sp = &self.sprites[p.sprite];
+            let (rung, rect) = sp.laid(p.rect, p.st.0 > p.st.2, self.pix);
+            let Some(s) = rung.map_or(sp.surface.as_ref(), |r| r.surface.as_ref()) else { continue };
+            let car = (CARS..CARS + VIEWS).contains(&p.sprite);
+            let g = if car { self.pix.max(1.0) } else { 1.0 };
+            let (x0, y0) = (snap(rect.0, g), snap(rect.1, g));
+            let (x1, y1) = (x0 + snap(rect.2 - rect.0, g), y0 + snap(rect.3 - rect.1, g));
+            let (u0, v0, u1, v1) = p.st;
+            // too small to see, or too large to draw: cairo's matrix would not invert
+            if !((0.5..1e6).contains(&(x1 - x0).abs()) && (0.5..1e6).contains(&(y1 - y0).abs())) || u1 == u0 || v1 == v0 {
+                continue;
+            }
+            let picture = tinted(s, p.top, p.foot, v0, v1);
             let _ = c.save();
             if p.clip.is_finite() {
                 c.rectangle(-1e5, -1e5, 2e5, p.clip + 1e5);
                 c.clip();
             }
+            c.rectangle(x0.min(x1), y0.min(y1), (x1 - x0).abs(), (y1 - y0).abs());
+            c.clip();
             c.set_operator(match p.mode {
                 Mode::Light(Blend::Add) => Operator::Add,
                 Mode::Light(_) => Operator::Screen,
                 Mode::Solid => Operator::Over,
             });
-            let (x0, y0, x1, y1) = p.rect;
-            // too small to see, or too large to draw: cairo's matrix would not invert
-            if !((0.5..1e6).contains(&(x1 - x0).abs()) && (0.5..1e6).contains(&(y1 - y0).abs())) {
-                let _ = c.restore();
-                continue;
+            let (w, h) = (s.width() as f64, s.height() as f64);
+            let (sx, sy) = ((x1 - x0) / ((u1 - u0) * w), (y1 - y0) / ((v1 - v0) * h));
+            c.translate(x0 - u0 * w * sx, y0 - v0 * h * sy);
+            c.scale(sx, sy);
+            let source = cairo::SurfacePattern::create(&picture);
+            if car {
+                source.set_filter(cairo::Filter::Nearest);
             }
-            let mut q = image_quad(x0, y0, x1, y1, p.top.0, p.top.1, p.st);
-            let (fc, fa) = p.foot;
-            for corner in [2usize, 3] {
-                q[corner * 8 + 2..corner * 8 + 6].copy_from_slice(&[fc.0 * fa, fc.1 * fa, fc.2 * fa, fa]);
+            if c.set_source(&source).is_ok() {
+                let _ = c.paint();
             }
-            let data: Vec<f32> = q.iter().map(|&v| v as f32).collect();
-            paint_vertices(c, s, &data);
             let _ = c.restore();
         }
     }
@@ -2045,6 +2564,32 @@ mod tests {
             let a = walk(&mut c, 7, s);
             assert!(a.at(zc).unwrap().1.abs() < 1e-4, "within a tenth of a pixel");
         }
+    }
+
+    #[test]
+    fn a_street_lamp_s_light_comes_on_the_road_gradually() {
+        // at night, a few centimetres a frame: no lamp's light on the road that can be seen (from NEAR
+        // on; the road shader's pool, along the road) jumps from one frame to the next
+        let spacing = 18.0;
+        let seen_at = |z: f32| (-(((NEAR as f32 - z).max(0.0) / 1.8).powi(2)) / 5.8).exp();
+        let lamps = |travel: f64| -> std::collections::HashMap<i64, f32> {
+            lamp_pools(7, spacing, 0.0, 1.0, travel, 0.0)
+                .iter()
+                .filter(|p| p[2] > 0.0)
+                .map(|p| (((p[0] as f64 + travel) / spacing).round() as i64, p[2] * seen_at(p[0])))
+                .collect()
+        };
+        let (mut was, mut seen) = (lamps(0.0), 0);
+        for step in 1..40_000 {
+            let now = lamps(step as f64 * 0.05);
+            for i in was.keys().chain(now.keys()) {
+                let (a, b) = (was.get(i).copied().unwrap_or(0.0), now.get(i).copied().unwrap_or(0.0));
+                assert!((a - b).abs() < 0.02, "lamp {i} went from {a} to {b} at {} m", step as f64 * 0.05);
+            }
+            seen = seen.max(now.len());
+            was = now;
+        }
+        assert!(seen >= 4, "the road is lit by several lamps: {seen}");
     }
 
     #[test]

@@ -28,42 +28,60 @@ fn sized(cam: &Camera, p: V3, size: f64, most: f64, a: f64) -> Option<Square> {
     (x0 > -s && y0 > -s && x0 < cam.w as f64 && y0 < cam.h as f64).then_some((x0, y0, x0 + s, y0 + s, a))
 }
 
-/// Whether a chimney is lit at `t`: each in its own spells of a few minutes, lit or not at random.
-fn lit(i: usize, t: f64) -> bool {
+/// Whether a chimney is lit at `t`: each in its own spells of a few minutes, lit or not at random;
+/// most of the spells at night, a few by day (`day`, 0 to 1).
+fn lit(i: usize, t: f64, day: f64) -> bool {
     const SPELL: f64 = 240.0;
     let spell = (t / SPELL + hash(i, 6)).floor() as usize;
-    hash(i * 1013 + spell, 7) < 0.6
+    hash(i * 1013 + spell, 7) < 0.6 - 0.4 * day
 }
 
-/// Smoke from each of `from` (a chimney only while it is lit): puffs rising, drifting downwind, growing
-/// and thinning as they go; a puff already let out goes on when its chimney is put out. And their
-/// colour: grey by day, lighter than the dark at night, so it is seen.
-pub fn smoke(cam: &Camera, from: &[(V3, bool)], t: f64, m: &Moment) -> (Vec<Square>, (f64, f64, f64)) {
-    const PERIOD: f64 = 7.0;
-    let mut out = vec![];
+/// How dark it is for what shows only at night (fires, fireflies): 0 by day, 1 at night, rising
+/// through dusk.
+fn night(m: &Moment) -> f64 {
+    ((1.0 - m.day) * 1.4 - 0.2).clamp(0.0, 1.0)
+}
+
+/// Smoke from each of `from` (a chimney only while it is lit, a fire only at night): square puffs rising, drifting downwind,
+/// growing and thinning as they go, each on a way of its own; a puff already let out goes on when its
+/// chimney is put out. In two greys, a puff one or the other, a chimney's mostly the darker, a fire's
+/// the lighter; grey by day, lighter than the dark at night, so it is seen: the puffs in each, and
+/// each's colour.
+pub fn smoke(cam: &Camera, from: &[(V3, bool)], t: f64, m: &Moment) -> [(Vec<Square>, (f64, f64, f64)); 2] {
+    let (mut dark, mut light) = (vec![], vec![]);
+    let lit_fire = night(m);
     for (i, &(e, chimney)) in from.iter().enumerate() {
-        // a chimney puffs thickly, a fire more thinly
-        let (puffs, rise) = if chimney { (14, 7.5) } else { (7, 6.0) };
+        if !chimney && lit_fire <= 0.0 {
+            continue;
+        }
+        // a chimney puffs thickly; a fire's column is slower and taller, its puffs larger and lighter
+        let (puffs, rise, period, grow, darker) = if chimney { (14, 7.5, 7.0, 1.0, 0.7) } else { (12, 8.0, 10.0, 1.3, 0.2) };
         for k in 0..puffs {
-            let age = (t / PERIOD + k as f64 / puffs as f64 + hash(i, 1)).fract();
-            if chimney && !lit(i, t - age * PERIOD) {
+            let run = t / period + k as f64 / puffs as f64 + hash(i, 1);
+            let age = run.fract();
+            if chimney && !lit(i, t - age * period, m.day) {
                 continue;
             }
-            let sway = 0.3 * (t * 0.7 + k as f64 * 1.9).sin();
-            let p = add(e, [1.6 * age + sway, rise * age, 0.8 * age]);
-            let a = 0.7 * (age * 5.0).min(1.0) * (1.0 - age).powf(1.3);
-            out.extend(square(cam, p, 0.35 + 0.9 * age, a));
+            // which puff this is, for its own way, size and grey
+            let id = i * 7919 + k * 131 + run.floor() as usize;
+            let (jx, jz, ph) = (hash(id, 14) - 0.5, hash(id, 15) - 0.5, 6.3 * hash(id, 16));
+            let sway = 0.3 * (t * 0.7 + ph).sin() * age.sqrt();
+            let p = add(e, [(1.6 + 0.6 * jx) * age + sway + 0.12 * jx, rise * age * (0.9 + 0.2 * hash(id, 17)), (0.8 + 0.6 * jz) * age + 0.12 * jz]);
+            let a = 0.75 * (age * 6.0).min(1.0) * (1.0 - age).powf(1.3) * if chimney { 1.0 } else { lit_fire };
+            let size = (0.3 + 0.9 * age) * grow * (0.85 + 0.3 * hash(id, 18));
+            let to = if hash(id, 19) < darker { &mut dark } else { &mut light };
+            to.extend(square(cam, p, size, a));
         }
     }
     let mix = |night: f64, day: f64| night + (day - night) * m.day;
-    (out, (mix(0.42, 0.62), mix(0.44, 0.62), mix(0.5, 0.64)))
+    [(dark, (mix(0.36, 0.5), mix(0.37, 0.5), mix(0.42, 0.53))), (light, (mix(0.46, 0.68), mix(0.48, 0.68), mix(0.54, 0.7)))]
 }
 
 /// Fireflies about each glade at night, drifting low and blinking now and then: their glow and their
 /// bright cores. Specks: a pixel or two at the core, however near, so they do not read as lamps.
 pub fn fireflies(cam: &Camera, glades: &[(V3, f64)], t: f64, m: &Moment) -> (Vec<Square>, Vec<Square>) {
     const EACH: usize = 3;
-    let night = ((1.0 - m.day) * 1.4 - 0.2).clamp(0.0, 1.0);
+    let night = night(m);
     let (mut glow, mut core) = (vec![], vec![]);
     if night <= 0.0 {
         return (glow, core);
@@ -85,6 +103,32 @@ pub fn fireflies(cam: &Camera, glades: &[(V3, f64)], t: f64, m: &Moment) -> (Vec
         }
     }
     (glow, core)
+}
+
+/// The flames of each fire of `fires` (those seen from the camera), lit at night only: square licks
+/// rising from its logs and flickering, the outer orange and the inner yellow. A fire burns from dusk
+/// to dawn; by day its logs lie cold.
+pub fn flames(cam: &Camera, fires: &[V3], t: f64, m: &Moment) -> (Vec<Square>, Vec<Square>) {
+    const LICKS: usize = 10;
+    let lit = night(m);
+    let (mut outer, mut inner) = (vec![], vec![]);
+    if lit <= 0.0 {
+        return (outer, inner);
+    }
+    for (f, &base) in fires.iter().enumerate() {
+        for k in 0..LICKS {
+            // each lick its own spot over the logs, jumping to another about ten times a second
+            let id = f * 97 + k * 13 + (t * 10.0 + hash(f * 31 + k, 20)).floor() as usize;
+            let (jx, jz, up) = (hash(id, 21) - 0.5, hash(id, 22) - 0.5, hash(id, 23));
+            let p = add(base, [0.5 * jx, 0.1 + 0.5 * up, 0.5 * jz]);
+            let size = 0.3 * (1.0 - 0.6 * up);
+            outer.extend(square(cam, p, size, lit));
+            if up < 0.5 {
+                inner.extend(square(cam, add(p, [0.0, -0.02, 0.0]), size * 0.55, lit));
+            }
+        }
+    }
+    (outer, inner)
 }
 
 /// Now and then, rarely, a bird crossing the sky high over the land, or a few in a V, flapping; by day

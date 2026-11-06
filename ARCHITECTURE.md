@@ -8,17 +8,43 @@ nothing between frames.
 | Module | Does |
 |---|---|
 | `config.rs`, `tweaks.rs` | Themes and `retro.toml`: `extends` chains, palette roles (and hue turning), tweaks, `[day]`/`[night]` looks, layout. Every setting checked against its kind's defaults; every tweak against its range (`tweaks::LIMITS`). A theme that loads cannot stop the wall; a user's theme that does not load gives way to the installed default. `retro.toml` is checked item by item: what does not check is said and left out |
-| `elements/` | The element kinds a scene is made of. Each declares its settings (TOML defaults), checks them, and builds its parts. `elements/instruments/` has one file per widget type and a table of them (`TYPES`) |
+| `elements/` | The element kinds a scene is made of. Each declares its settings (TOML defaults), checks them, and builds its parts. `elements/instruments/` has one file per widget type and a table of them (`TYPES`). A new kind, step by step, with a 2D and a 3D one whole: `EXTENDING.md`, "In code: a new kind of element" |
 | `scene.rs` | `Part` trait; the scene compiler: still passes painted once into layers, runs of layers between live passes merged into one texture, empty runs dropped. `compose()` draws the still picture. A part draws in the look its `Geo` carries; it adds its pictures to `Uploads` and keeps their handles |
-| `gfx.rs` | The renderer: one vertex stream a frame, a draw per run of quads with the same texture, blend, clip and mask (a second texture's alpha, a tank's window). OpenGL 3.3 core, or 2.1 where the driver has no more |
+| `gfx.rs` | The renderer: one vertex stream a frame, a draw per run of quads with the same texture, blend, clip and mask (a second texture's alpha, a tank's window). Small filtered pictures go up packed onto pages (`Uploads::add_packed`), so many of them are one draw: a draw costs a small processor's driver far more than its pixels. New pixels of a texture's size go into the storage it has. A table a shader reads every frame can go up as a vec4 array uniform (`Gfx::uniform_array`, where `uniform_room` allows), far cheaper for a driver than a texture changed each frame. OpenGL 3.3 core, or 2.1 where the driver has no more |
 | `live.rs` | The frame loop: one window per monitor driven (one, or `--all-monitors` as they come and go), the header placed by `[monitors]`, pausing (battery, screen off, VNC viewer), covered-monitor detection, `--snapshot`. The look is chosen here and handed to each monitor's scene |
 | `platform/` | Everything system-specific, behind `Platform` (the machine: power, counters, addresses, the desktop), `Display` (monitors, windows and GL contexts, events, coverage, screen off) and `Desktop` (a desktop environment's wallpaper settings). `platform/linux/`: X11 and GLX, `/proc` and `/sys`, the desktops' own tools; `platform/macos/`: Cocoa and NSOpenGL, Mach, sysctl and IOKit, NSWorkspace. `platform/windows/`: Win32 and WGL (windows behind the desktop icons, in Explorer's WorkerW), the system's counters, the wallpaper through SystemParametersInfo |
+| `trace/` | Scenes traced on the CPU, for an element that draws a world of its own in 3D (`elements/blocky/` is one): the camera, rays and boxes, models of hinged boxes, and what moves over a picture traced once. See "Traced scenes" |
 | `still.rs` | The still picture, handed to the desktop or shown in a window of our own |
 | `sources/`, `plugins.rs` | Readings: built-in sources on a thread; plugin sources and faces as child processes speaking JSON lines |
-| `svg.rs`, `path.rs`, `title.rs`, `util.rs` | SVG layers (with an exact cache in `$XDG_CACHE_HOME/retro-wall`, on Windows `%LOCALAPPDATA%\retro-wall\cache`), SVG path data, the hostname lettering, shared drawing helpers |
+| `svg.rs`, `path.rs`, `title.rs`, `util.rs` | SVG layers and what a theme works out once (with an exact cache in `$XDG_CACHE_HOME/retro-wall`, on Windows `%LOCALAPPDATA%\retro-wall\cache`), SVG path data, the hostname lettering, shared drawing helpers |
 | `files.rs` | Every file a theme or the config names is opened here: regular files only, each kind within its size |
 | `font.rs` | The typeface, DejaVu Sans Mono, carried in the binary: written to the cache once and registered for the process (`platform::register_font`) before anything draws |
 | `cli.rs` | The command line, `--new`, `--settings`, `--list`, `--preview`, `--desktop` (the installer's save and restore of the desktop's wallpaper settings) |
+
+## Traced scenes
+
+An element that draws a world in 3D traces it once on the CPU, then lights and moves it each frame. `trace/`
+holds what such an element shares, so a new one is a world and its models, not a renderer:
+
+- `camera`: the eye, the ray through a pixel, where a point falls on the screen (`bounds`, `pixels`).
+- `boxes`: a ray and a box, exactly (`slab`), and quickly with the ray's reciprocal (`Ray::enters`) on a
+  box grown by `PAD`, which never misses a box the exact test finds.
+- `rig`: a model of boxes, each on an optional hinge, placed and turned in the world. `Pose::new` once a
+  frame; `Pose::trace` into a region gives each pixel it is seen in. Only the pixels whose middles lie in
+  a part's outline on the screen (the hull of its box's corners, row by row) are traced, only those
+  parts there, and none where the scene is nearer than the model can be (behind a house).
+- `sprites`: what moves over the traced picture. `Backdrop` keeps the picture and its depths under it;
+  `Changes` gives the regions to paint again, where something moved from and to, merged. A pixel is the
+  backdrop and what is traced over it, so a region painted again is what painting all of it would make.
+  A thing hidden where it is (all of its pixels behind the scene) changes nothing.
+- `rows`: a picture filled row by row on every core.
+
+What is the same each start (the traced picture, its depths, pictures made at many sizes) goes in the
+theme's cache: `svg::kept_bytes`, keyed by the screen size, a tag of the settings it was made with, the
+theme file and the build; `svg::kept_read` and `svg::keep` read and write it apart, so it is read while
+something else is made. `util::pack_surfaces` keeps a list of pictures. The still picture works out only
+what shows: nothing under what is opaque. It is handed to the desktop as a PNG made by `util::write_png`,
+quickly: the same pixels as cairo's, in a fraction of the time.
 
 ## A frame
 

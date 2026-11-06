@@ -81,9 +81,10 @@ the food the free memory, the experience bar the disk's activity and its level h
 </table>
 
 matrix, racing and forest show only the scene by default, and blocky the scene and its interface. Set
-`[monitors]` in `retro.toml` to show the hostname, instruments and graph, as here. blocky's hand is off
-by default: a theme of your own that extends it turns it on (`extends = "blocky"`, then `hand = true`
-under `[element.world]`).
+`[monitors]` in `retro.toml` to show the hostname, instruments and graph, as here. Any theme's parts are
+settings `retro.toml` can change, so a part is hidden or moved without a theme of your own: blocky's hand
+is off by default, and `[element.world]` with `hand = true` turns it on; `ui = false` hides the
+interface.
 
 Made a theme of your own? Share it: `retro-wall --new theme NAME` starts one, `EXTENDING.md` shows what
 it can do, and a pull request with the theme and a GIF of it (made from `--snapshot --frames`) puts it here
