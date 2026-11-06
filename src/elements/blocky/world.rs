@@ -82,6 +82,8 @@ pub const CAMPFIRE: u8 = 56;
 pub const COBBLE_SLAB: u8 = 57;
 /// Rails: `RAIL` runs along x, `RAIL_Z` along z.
 pub const RAIL_Z: u8 = 58;
+/// A chimney's top: cobblestone, open at the top.
+pub const CHIMNEY_TOP: u8 = 59;
 
 /// How a block is drawn.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -156,7 +158,7 @@ pub fn block(b: u8) -> Block {
         POTATOES => (Crop, [t::POTATOES; 3], false),
         BEETROOTS => (Crop, [t::BEETROOTS; 3], false),
         FENCE => (Boxes, [t::PLANKS; 3], false),
-        TORCH => (Boxes, [t::TORCH; 3], false),
+        TORCH => (Boxes, [t::TORCH_TOP, t::TORCH, t::TORCH], false),
         HAY => (Cube, [t::HAY_TOP, t::HAY_SIDE, t::HAY_TOP], false),
         CRAFTING => (Cube, [t::CRAFTING_TOP, t::CRAFTING_SIDE, t::PLANKS], false),
         OAK_SLAB => (Boxes, [t::PLANKS; 3], false),
@@ -166,10 +168,11 @@ pub fn block(b: u8) -> Block {
         MOB => (Mob, [0; 3], false),
         RAIL => (Boxes, [t::RAIL_X; 3], false),
         RAIL_Z => (Boxes, [t::RAIL; 3], false),
-        LANTERN => (Boxes, [t::LANTERN; 3], false),
+        LANTERN => (Boxes, [t::LANTERN_TOP, t::LANTERN, t::LANTERN_TOP], false),
         LILY => (Boxes, [t::LILY, t::LILY, t::LILY], true),
         CAMPFIRE => (Cross, [t::CAMPFIRE; 3], false),
         COBBLE_SLAB => (Boxes, [t::COBBLE; 3], false),
+        CHIMNEY_TOP => (Cube, [t::CHIMNEY_TOP, t::COBBLE, t::COBBLE], false),
         _ => (Air, [0; 3], false),
     };
     let glow = match b {
@@ -222,7 +225,12 @@ pub fn boxes(w: &World, b: u8, x: i32, y: i32, z: i32) -> ([Box16; 5], usize) {
             push([0, 8, 0, 16, 16, 8]);
         }
         TORCH => push([7, 0, 7, 9, 10, 9]),
-        LANTERN => push([5, 0, 5, 11, 10, 11]),
+        LANTERN => {
+            // the cage, its cap and the handle's loop over that
+            push([5, 0, 5, 11, 7, 11]);
+            push([6, 7, 6, 10, 9, 10]);
+            push([6, 9, 7, 10, 11, 9]);
+        }
         RAIL | RAIL_Z | LILY => push([0, 0, 0, 16, 1, 16]),
         FENCE => {
             push([6, 0, 6, 10, 16, 10]);
@@ -320,6 +328,8 @@ pub struct World {
     pub ponds: Vec<[i32; 4]>,
     /// The viewer's eye.
     pub eye: [f64; 3],
+    /// Whether `light` is worked out (`light_up`).
+    lit: bool,
 }
 
 /// The side of the squares of columns the tracer skips whole.
@@ -396,7 +406,16 @@ impl World {
         }
     }
 
+    #[cfg(test)]
     pub fn new(seed: i64, ahead: Ahead) -> World {
+        let mut w = World::unlit(seed, ahead);
+        w.light_up();
+        w
+    }
+
+    /// The world without its light, for what does not trace it: the animals, the smoke, a picture read
+    /// from the cache. `light_up` lights it.
+    pub fn unlit(seed: i64, ahead: Ahead) -> World {
         let n = (S * S * H) as usize;
         let mut w = World {
             blocks: vec![AIR; n],
@@ -409,6 +428,7 @@ impl World {
             pens: vec![],
             ponds: vec![],
             eye: [0.5, 80.0, 0.5],
+            lit: false,
         };
         let farm = ((ahead.0 * FARM_AHEAD).round() as i32, (ahead.1 * FARM_AHEAD).round() as i32);
         let heights = Terrain::new(seed, ahead, farm);
@@ -418,7 +438,6 @@ impl World {
         super::farm::build(&mut w, seed, farm, ahead);
         w.eye = [0.5, GROUND as f64 + EYE, 0.5];
         w.measure();
-        w.light_up();
         w
     }
 
@@ -668,7 +687,10 @@ impl World {
     /// The light: the sky's 15 down each column until something stops it (a level less through each
     /// leaf or water block), the torches' from each; both spread sideways and down a level less a
     /// block.
-    fn light_up(&mut self) {
+    pub fn light_up(&mut self) {
+        if std::mem::replace(&mut self.lit, true) {
+            return;
+        }
         let h = H as usize;
         let mut sky: Vec<Vec<(i32, i32, i32)>> = vec![vec![]; 16];
         let mut torch: Vec<Vec<(i32, i32, i32)>> = vec![vec![]; 16];

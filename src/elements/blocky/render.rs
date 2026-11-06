@@ -7,74 +7,13 @@
 //! unlit, clear where the sky shows (so the clouds can go between), and the light on it, the sky's
 //! and the torches' apart, with the haze; the time of day lights them each frame (`sky`).
 
-use super::mobs::slab;
 use super::textures::{ARM, Rgba, Textures, WATER as WATER_FACE};
 use super::world::*;
+use crate::trace::boxes::slab;
+pub use crate::trace::{Camera, V3, add, cross, dot, mul, norm};
 
-pub type V3 = [f64; 3];
-
-pub fn add(a: V3, b: V3) -> V3 {
-    [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
-}
-pub fn mul(a: V3, k: f64) -> V3 {
-    [a[0] * k, a[1] * k, a[2] * k]
-}
-pub fn dot(a: V3, b: V3) -> f64 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
-pub fn cross(a: V3, b: V3) -> V3 {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
-}
-pub fn norm(a: V3) -> V3 {
-    mul(a, 1.0 / dot(a, a).sqrt())
-}
 fn mix3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
     [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
-}
-
-/// The eye, where it looks, and its lens.
-#[derive(Clone, Copy)]
-pub struct Camera {
-    pub eye: V3,
-    pub forward: V3,
-    pub right: V3,
-    pub up: V3,
-    /// tan of half the vertical field of view, and the screen's width over its height.
-    pub tan: f64,
-    pub aspect: f64,
-    pub w: usize,
-    pub h: usize,
-}
-
-impl Camera {
-    pub fn new(eye: V3, yaw: f64, pitch: f64, fov: f64, w: usize, h: usize) -> Camera {
-        let forward = [pitch.cos() * yaw.sin(), pitch.sin(), pitch.cos() * yaw.cos()];
-        let right = norm(cross(forward, [0.0, 1.0, 0.0]));
-        let up = cross(right, forward);
-        Camera { eye, forward, right, up, tan: (fov.to_radians() / 2.0).tan(), aspect: w as f64 / h as f64, w, h }
-    }
-    /// The ray through a point of the screen, in pixels from its top left.
-    pub fn ray(&self, px: f64, py: f64) -> V3 {
-        let x = (2.0 * px / self.w as f64 - 1.0) * self.tan * self.aspect;
-        let y = (1.0 - 2.0 * py / self.h as f64) * self.tan;
-        norm(add(add(self.forward, mul(self.right, x)), mul(self.up, y)))
-    }
-    /// The angle one pixel spans.
-    pub fn pixel(&self) -> f64 {
-        2.0 * self.tan / self.h as f64
-    }
-    /// Where a point of the world falls on the screen, in pixels from its top left, and how many pixels a
-    /// block spans there; None behind the eye.
-    pub fn project(&self, p: V3) -> Option<(f64, f64, f64)> {
-        let d = add(p, mul(self.eye, -1.0));
-        let z = dot(d, self.forward);
-        if z < 0.2 {
-            return None;
-        }
-        let (x, y) = (dot(d, self.right) / z, dot(d, self.up) / z);
-        let (w, h) = (self.w as f64, self.h as f64);
-        Some(((x / (self.tan * self.aspect) + 1.0) * w / 2.0, (1.0 - y / self.tan) * h / 2.0, h / (2.0 * self.tan * z)))
-    }
 }
 
 /// The light curve: a level of light, 0 to 15, as brightness, 0 to 1.
@@ -231,12 +170,23 @@ pub struct Tracer<'a> {
     pub tex: &'a Textures,
     pub cam: Camera,
     /// Where the haze starts and where it hides everything, in blocks across the ground.
-    fog: (f64, f64),
+    pub fog: (f64, f64),
     /// The sun's (and the moon's) places along their arc whose shadows are baked: `SUNS` of them.
     suns: [V3; SUNS],
     arm: Option<Arm>,
     /// The texels a pixel spans at one block's distance, along a face seen square on.
     footprint: f64,
+}
+
+/// How much the haze hides what a ray along `d` meets `t` along it, 0 to 1: by its distance across the
+/// ground, from where the haze starts (`fog`'s first) to where it hides everything (its second).
+pub fn haze(fog: (f64, f64), d: V3, t: f64) -> f32 {
+    let flat = t * (d[0] * d[0] + d[2] * d[2]).sqrt();
+    if flat <= fog.0 {
+        return 0.0;
+    }
+    let f = (((flat - fog.0) / (fog.1 - fog.0)).clamp(0.0, 1.0)) as f32;
+    f * f * (3.0 - 2.0 * f)
 }
 
 /// How many places along the sun's arc the shadows are baked for, evenly from rising to setting.
@@ -360,11 +310,11 @@ impl<'a> Tracer<'a> {
             return None;
         }
         let slant = (d[0] * n[0] as f64 + d[1] * n[1] as f64 + d[2] * n[2] as f64).abs();
-        use super::textures::{BIRCH_LEAVES, CAMPFIRE, LANTERN, OAK_LEAVES, SPRUCE_LEAVES, TORCH};
+        use super::textures::{BIRCH_LEAVES, CAMPFIRE, LANTERN, OAK_LEAVES, SPRUCE_LEAVES, TORCH, TORCH_TOP};
         // a light's hot pixels, told by their colour in the full-size picture, and shown in it: a
         // smaller picture would mix a far torch's flame with its stick, and it would not glow
         let full = self.tex.all[face].at(u, v, 0);
-        let hot = matches!(face, TORCH | LANTERN | CAMPFIRE) && full[0] > 0.75 && full[0] > full[2] + 0.25;
+        let hot = matches!(face, TORCH | TORCH_TOP | LANTERN | CAMPFIRE) && full[0] > 0.75 && full[0] > full[2] + 0.25;
         let c = if hot { full } else { self.texel(face, u, v, t, slant) };
         // the light's corners run along the axes, from low to high
         let (sky, torch, ao) = self.smooth_light(open, f[ua], f[va], ua, va);
@@ -657,13 +607,11 @@ impl<'a> Tracer<'a> {
             }
         }
         let (l, t) = self.trace(self.cam.eye, d, self.fog.1 + 8.0)?;
-        // the haze, by distance across the ground
-        let flat = t * (d[0] * d[0] + d[2] * d[2]).sqrt();
-        let f = (((flat - self.fog.0) / (self.fog.1 - self.fog.0)).clamp(0.0, 1.0)) as f32;
+        let f = haze(self.fog, d, t);
         if f >= 1.0 {
             return None;
         }
-        Some((l, f * f * (3.0 - 2.0 * f), Some(add(self.cam.eye, mul(d, t)))))
+        Some((l, f, Some(add(self.cam.eye, mul(d, t)))))
     }
 
     /// Which of the sun's places reach a point facing `n`: a bit each, set where nothing stands between
@@ -700,23 +648,7 @@ impl<'a> Tracer<'a> {
         let mut base = vec![0u8; w * h * 4];
         let mut light = vec![0u8; w * h * 4];
         let mut sun = vec![0u8; w * h * 4];
-        {
-            let rows: Vec<(usize, &mut [u8], &mut [u8], &mut [u8])> =
-                base.chunks_mut(w * 4).zip(light.chunks_mut(w * 4)).zip(sun.chunks_mut(w * 4)).enumerate().map(|(y, ((b, l), s))| (y, b, l, s)).collect();
-            let rows = std::sync::Mutex::new(rows.into_iter());
-            let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(32);
-            std::thread::scope(|s| {
-                for _ in 0..threads {
-                    s.spawn(|| {
-                        loop {
-                            let next = rows.lock().unwrap_or_else(|e| e.into_inner()).next();
-                            let Some((y, brow, lrow, srow)) = next else { break };
-                            self.row(y, n, brow, lrow, srow);
-                        }
-                    });
-                }
-            });
-        }
+        crate::trace::rows([&mut base, &mut light, &mut sun], w * 4, |y, [b, l, s]| self.row(y, n, b, l, s));
         Frame { base, light, sun }
     }
 

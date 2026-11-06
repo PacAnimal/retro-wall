@@ -64,17 +64,24 @@ pub type Region = (i32, i32, i32, i32);
 
 /// Pictures to upload once the renderer exists, each with the handle it will have.
 #[derive(Default)]
-pub struct Uploads(Vec<(ImageSurface, Kind, Option<Region>)>);
+pub struct Uploads(Vec<(ImageSurface, Kind, Option<Region>, bool)>);
 
 impl Uploads {
     /// Add a picture; its handle.
     pub fn add(&mut self, s: ImageSurface, kind: Kind) -> Tex {
-        self.0.push((s, kind, None));
+        self.0.push((s, kind, None, false));
         Tex(self.0.len() as u32 - 1)
     }
     /// Add a picture-sized picture of which only `region` shows: only that part is kept (a Layer).
     pub fn add_layer(&mut self, s: ImageSurface, region: Region) -> Tex {
-        self.0.push((s, Kind::Layer, Some(region)));
+        self.0.push((s, Kind::Layer, Some(region), false));
+        Tex(self.0.len() as u32 - 1)
+    }
+    /// Add a small picture, filtered and drawn scaled (Smooth), to go up packed with others into one
+    /// texture: drawn one after another, they are one draw, where each of its own would be one each,
+    /// and a draw costs a small processor's driver far more than its pixels do. Drawn with `draw` only.
+    pub fn add_packed(&mut self, s: ImageSurface) -> Tex {
+        self.0.push((s, Kind::Smooth, None, true));
         Tex(self.0.len() as u32 - 1)
     }
     pub fn len(&self) -> usize {
@@ -106,6 +113,8 @@ struct Custom {
     prog: GLuint,
     uniforms: std::ops::Range<usize>,
     textures: std::ops::Range<usize>,
+    /// Its vec4 array uniform, if it has one (`uniform_array`).
+    array: Option<(GLint, Vec<f32>)>,
 }
 
 struct Cmd {
@@ -128,6 +137,59 @@ struct Texture {
     place: (f64, f64, f64, f64),
     /// The framebuffer drawing into it, for a render target (`Gfx::render_target`); 0 for none.
     fbo: GLuint,
+    /// Its storage as last made: width, height, format and kind; new pixels of the same go into it.
+    stored: Option<(i32, i32, u32, Kind)>,
+    /// A packed picture's page (`Uploads::add_packed`) and its place there: u, v of its top left, and
+    /// its width and height, as fractions of the page.
+    packed: Option<(Tex, f32, f32, f32, f32)>,
+}
+
+/// How wide a page of packed pictures is, and how tall it may grow.
+const PAGE: (i32, i32) = (2048, 4096);
+
+/// Pictures packed onto pages, in shelves: each picture's place, its page and top left there, and the
+/// pages. Each picture has a pixel round it of its own edge's pixels, so a filtered texture reads at
+/// its edge what it would alone, clamped. A picture that does not fit a page is not packed.
+fn pack(pictures: &[(usize, &ImageSurface)]) -> (Vec<(usize, usize, i32, i32)>, Vec<ImageSurface>) {
+    let mut order: Vec<&(usize, &ImageSurface)> = pictures.iter().filter(|(_, s)| s.width() + 2 <= PAGE.0 && s.height() + 2 <= PAGE.1).collect();
+    order.sort_by_key(|(_, s)| std::cmp::Reverse(s.height()));
+    // shelves: each picture at the right of the last on its shelf, a new shelf when it does not fit
+    let (mut places, mut sizes) = (vec![], vec![(0i32, 0i32)]);
+    let (mut x, mut y, mut shelf) = (0, 0, 0);
+    for (i, s) in order {
+        let (w, h) = (s.width() + 2, s.height() + 2);
+        if x + w > PAGE.0 {
+            (x, y, shelf) = (0, y + shelf, 0);
+        }
+        if y + h > PAGE.1 {
+            sizes.push((0, 0));
+            (x, y, shelf) = (0, 0, 0);
+        }
+        let page = sizes.len() - 1;
+        places.push((*i, page, x, y));
+        (x, shelf) = (x + w, shelf.max(h));
+        sizes[page] = (sizes[page].0.max(x), sizes[page].1.max(y + shelf));
+    }
+    let mut pages: Vec<ImageSurface> = sizes.iter().map(|&(w, h)| crate::util::surface(w.max(1), h.max(1))).collect();
+    for &(i, page, px, py) in &places {
+        let Some(&(_, s)) = pictures.iter().find(|p| p.0 == i) else { continue };
+        let (w, h, sstride) = (s.width(), s.height(), s.stride() as usize);
+        let mut src = vec![];
+        let _ = s.with_data(|d| src = d.to_vec());
+        let dst = &mut pages[page];
+        let dstride = dst.stride() as usize;
+        if let Some(mut d) = crate::util::view(dst) {
+            for row in -1..=h {
+                let sr = row.clamp(0, h - 1) as usize;
+                for col in -1..=w {
+                    let sc = col.clamp(0, w - 1) as usize;
+                    let at = ((py + 1 + row) as usize) * dstride + ((px + 1 + col) as usize) * 4;
+                    d[at..at + 4].copy_from_slice(&src[sr * sstride + sc * 4..sr * sstride + sc * 4 + 4]);
+                }
+            }
+        }
+    }
+    (places, pages)
 }
 
 /// Where a surface's pixels start, flushed, for GL to copy from: stride x height bytes; None for a
@@ -169,6 +231,8 @@ pub struct Gfx {
     /// Not Send or Sync: every GL call relies on its window's context being current, which it is on
     /// the thread that made it only.
     _thread: std::marker::PhantomData<*const ()>,
+    /// A vec4 array for the next custom draw (`uniform_array`).
+    next_array: Option<(GLint, Vec<f32>)>,
 }
 
 // names a theme's fragment shader shares with it start with retro_, which themes leave alone
@@ -351,9 +415,36 @@ impl Gfx {
                 core,
                 mipmaps,
                 _thread: std::marker::PhantomData,
+                next_array: None,
             };
-            for (s, kind, region) in up.0 {
-                gfx.upload_region(&s, kind, region);
+            // the packed pictures onto pages, which go up after every other picture: page k is texture
+            // n + k
+            let n = up.0.len();
+            let packed: Vec<(usize, &ImageSurface)> =
+                up.0.iter().enumerate().filter(|(_, e)| e.3 && e.0.format() == Format::ARgb32).map(|(i, e)| (i, &e.0)).collect();
+            let (places, pages) = pack(&packed);
+            for (i, (s, kind, region, _)) in up.0.iter().enumerate() {
+                match places.iter().find(|p| p.0 == i) {
+                    Some(&(_, page, x, y)) => {
+                        let (pw, ph) = (pages[page].width() as f32, pages[page].height() as f32);
+                        let (w, h) = (s.width(), s.height());
+                        let at = ((x + 1) as f32 / pw, (y + 1) as f32 / ph, w as f32 / pw, h as f32 / ph);
+                        let packed = Some((Tex((n + page) as u32), at.0, at.1, at.2, at.3));
+                        gfx.textures.push(Texture { id: 0, w, h, place: (0.0, 0.0, w as f64, h as f64), fbo: 0, stored: None, packed });
+                    }
+                    None => {
+                        gfx.upload_region(s, *kind, *region);
+                    }
+                }
+            }
+            for page in &pages {
+                gfx.upload(page, Kind::Smooth);
+            }
+            let ids: Vec<GLuint> = gfx.textures.iter().skip(n).map(|t| t.id).collect();
+            for t in gfx.textures.iter_mut().take(n) {
+                if let Some((page, ..)) = t.packed {
+                    t.id = ids.get(page.0 as usize - n).copied().unwrap_or(0);
+                }
             }
             gfx
         }
@@ -378,7 +469,7 @@ impl Gfx {
         // SAFETY: its window's context is current; one name written to `id`.
         unsafe { gl::GenTextures(1, &mut id) };
         let t = Tex(self.textures.len() as u32);
-        self.textures.push(Texture { id, w: 0, h: 0, place: (0.0, 0.0, 0.0, 0.0), fbo: 0 });
+        self.textures.push(Texture { id, w: 0, h: 0, place: (0.0, 0.0, 0.0, 0.0), fbo: 0, stored: None, packed: None });
         self.replace_region(t, s, kind, region);
         t
     }
@@ -416,12 +507,32 @@ impl Gfx {
         };
         let stride = src.stride() as usize;
         let mipmaps = matches!(kind, Kind::Sprite | Kind::Tile | Kind::Pixel);
+        let internal = if src.format() == Format::Rgb24 { gl::RGB } else { gl::RGBA };
+        // the same size and kind as before: the pixels go into the storage it has, not new storage, which
+        // costs a driver a great deal more, every frame for a texture drawn again each frame
+        let again = tx.stored == Some((w, h, internal, kind));
+        tx.stored = Some((w, h, internal, kind));
         // SAFETY: a GL context is current, and no pixel unpack buffer is bound, so GL copies from
         // `data` before each call returns. `data` starts `src`'s stride x height bytes (`pixel_start`),
         // which `src` keeps alive and unchanged meanwhile (see `pixel_start`); every pointer handed to GL
-        // is a row of the rectangle (x, y, w, h), which lies within the surface.
+        // is a row of the rectangle (x, y, w, h), which lies within the surface, and into a texture whose
+        // storage is that size (`again`).
         unsafe {
             gl::BindTexture(gl::TEXTURE_2D, tx.id);
+            if again {
+                gl::PixelStorei(gl::UNPACK_ROW_LENGTH, src.stride() / 4);
+                // in strips of a megabyte or so, as a first upload is
+                let rows = (UPLOAD_BYTES / (4 * w as usize)).max(1) as i32;
+                for r in (0..h).step_by(rows as usize) {
+                    let at = data.add((y + r) as usize * stride + x as usize * 4).cast();
+                    gl::TexSubImage2D(gl::TEXTURE_2D, 0, 0, r, w, rows.min(h - r), gl::BGRA, gl::UNSIGNED_BYTE, at);
+                }
+                if mipmaps && self.mipmaps {
+                    gl::GenerateMipmap(gl::TEXTURE_2D);
+                }
+                gl::PixelStorei(gl::UNPACK_ROW_LENGTH, 0);
+                return;
+            }
             let (min, mag, wrap) = match kind {
                 Kind::Sprite => (gl::LINEAR_MIPMAP_LINEAR, gl::LINEAR, gl::CLAMP_TO_EDGE),
                 Kind::Tile => (gl::LINEAR_MIPMAP_LINEAR, gl::LINEAR, gl::REPEAT),
@@ -437,7 +548,6 @@ impl Gfx {
             gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, wrap as i32);
             gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, wrap as i32);
             gl::PixelStorei(gl::UNPACK_ROW_LENGTH, src.stride() / 4);
-            let internal = if src.format() == Format::Rgb24 { gl::RGB } else { gl::RGBA };
             let at = |row: i32| data.add(row as usize * stride + x as usize * 4).cast();
             // in strips of a megabyte or so: a driver may keep a staging buffer as large as one upload
             let rows = (UPLOAD_BYTES / (4 * w as usize)).max(1) as i32;
@@ -453,6 +563,23 @@ impl Gfx {
                 gl::GenerateMipmap(gl::TEXTURE_2D);
             }
             gl::PixelStorei(gl::UNPACK_ROW_LENGTH, 0);
+        }
+    }
+
+    /// Pixels into part of a texture, its top left at (x, y) of it: `w` x `h` of them, B, G, R, A, rows
+    /// packed; straight from the bytes, no picture made of them first.
+    pub fn replace_bytes(&mut self, t: Tex, data: &[u8], x: i32, y: i32, w: i32, h: i32) {
+        let tx = &self.textures[t.0 as usize];
+        if w <= 0 || h <= 0 || x < 0 || y < 0 || x + w > tx.w || y + h > tx.h || data.len() < (w * h * 4) as usize {
+            return;
+        }
+        // SAFETY: a GL context is current, and no pixel unpack buffer is bound, so GL copies the w x h
+        // pixels, rows packed (whole pixels, so the default unpack alignment holds), from `data`, which
+        // holds that many (checked), before the call returns; the region lies within the texture
+        // (checked).
+        unsafe {
+            gl::BindTexture(gl::TEXTURE_2D, tx.id);
+            gl::TexSubImage2D(gl::TEXTURE_2D, 0, x, y, w, h, gl::BGRA, gl::UNSIGNED_BYTE, data.as_ptr().cast());
         }
     }
 
@@ -490,10 +617,10 @@ impl Gfx {
         }
     }
 
-    /// A texture `w` x `h` that draws can go into (`target`), its texels sampled sharp, for a picture
-    /// drawn small and shown large through a shader of its own. None where the driver has no
-    /// framebuffer objects.
-    pub fn render_target(&mut self, w: i32, h: i32) -> Option<Tex> {
+    /// A texture `w` x `h` that draws can go into (`target`), for a picture drawn small and shown large
+    /// through a shader of its own: its texels sampled sharp, or `smooth`, between them. None where the
+    /// driver has no framebuffer objects.
+    pub fn render_target(&mut self, w: i32, h: i32, smooth: bool) -> Option<Tex> {
         if !self.fbos || w <= 0 || h <= 0 {
             return None;
         }
@@ -504,9 +631,10 @@ impl Gfx {
             gl::GenTextures(1, &mut id);
             gl::BindTexture(gl::TEXTURE_2D, id);
             gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA as i32, w, h, 0, gl::BGRA, gl::UNSIGNED_BYTE, std::ptr::null());
+            let filter = if smooth { gl::LINEAR } else { gl::NEAREST };
             for (k, v) in [
-                (gl::TEXTURE_MIN_FILTER, gl::NEAREST),
-                (gl::TEXTURE_MAG_FILTER, gl::NEAREST),
+                (gl::TEXTURE_MIN_FILTER, filter),
+                (gl::TEXTURE_MAG_FILTER, filter),
                 (gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE),
                 (gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE),
             ] {
@@ -522,7 +650,7 @@ impl Gfx {
                 gl::DeleteTextures(1, &id);
                 return None;
             }
-            self.textures.push(Texture { id, w, h, place: (0.0, 0.0, w as f64, h as f64), fbo });
+            self.textures.push(Texture { id, w, h, place: (0.0, 0.0, w as f64, h as f64), fbo, stored: None, packed: None });
             Some(Tex(self.textures.len() as u32 - 1))
         }
     }
@@ -578,6 +706,15 @@ impl Gfx {
     pub fn draw(&mut self, tex: Option<Tex>, data: &[f32], blend: Blend) {
         let n = data.len() / 32;
         if n == 0 {
+            return;
+        }
+        // a packed picture: drawn from its page, its corners' u, v moved to its place there
+        if let Some((page, u0, v0, su, sv)) = tex.and_then(|t| self.textures[t.0 as usize].packed) {
+            self.run(Some(page), blend, n);
+            for corner in data[..n * 32].as_chunks::<8>().0 {
+                self.verts.extend_from_slice(&[u0 + corner[0] * su, v0 + corner[1] * sv]);
+                self.verts.extend_from_slice(&corner[2..]);
+            }
             return;
         }
         self.run(tex, blend, n);
@@ -721,13 +858,30 @@ impl Gfx {
         unsafe { gl::GetUniformLocation(prog, n.as_ptr()) }
     }
 
+    /// A vec4 array uniform (`data` four floats an element) for the next `custom` draw: a table a shader
+    /// reads every frame goes up with its uniforms this way, which costs a driver far less than a
+    /// texture changed each frame. Check `uniform_room` first.
+    pub fn uniform_array(&mut self, loc: GLint, data: Vec<f32>) {
+        self.next_array = Some((loc, data));
+    }
+
+    /// How many vec4 uniforms a fragment shader may have here.
+    pub fn uniform_room(&self) -> i32 {
+        let mut n = 0;
+        // SAFETY: its window's context is current; one integer is written to `n`.
+        unsafe {
+            gl::GetIntegerv(0x8B49 /* GL_MAX_FRAGMENT_UNIFORM_COMPONENTS */, &mut n)
+        };
+        n / 4
+    }
+
     /// One quad over (x0, y0)-(x1, y1), drawn by a theme's shader with these inputs.
     pub fn custom(&mut self, prog: GLuint, uniforms: &[Uniform], textures: &[(GLint, Tex)], x0: f64, y0: f64, x1: f64, y1: f64, blend: Blend) {
         let u = self.uniforms.len();
         self.uniforms.extend(uniforms.iter().filter(|x| x.0 >= 0));
         let t = self.samplers.len();
         self.samplers.extend_from_slice(textures);
-        let custom = Custom { prog, uniforms: u..self.uniforms.len(), textures: t..self.samplers.len() };
+        let custom = Custom { prog, uniforms: u..self.uniforms.len(), textures: t..self.samplers.len(), array: self.next_array.take() };
         let first = self.verts.len() / 32;
         let c = [1.0; 4];
         self.corner(0.0, 0.0, c, x0, y0);
@@ -823,6 +977,9 @@ impl Gfx {
                 if let Some(k) = c.custom {
                     let cu = &self.customs[k];
                     gl::UseProgram(cu.prog);
+                    if let Some((loc, data)) = &cu.array {
+                        gl::Uniform4fv(*loc, (data.len() / 4) as i32, data.as_ptr());
+                    }
                     for (loc, n, v) in &self.uniforms[cu.uniforms.clone()] {
                         match n {
                             1 => gl::Uniform1f(*loc, v[0]),
@@ -903,5 +1060,58 @@ impl Gfx {
             out[r * row..(r + 1) * row].copy_from_slice(&px[(h as usize - 1 - r) * row..(h as usize - r) * row]);
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod pack_tests {
+    use super::*;
+
+    #[test]
+    fn packed_pictures_are_whole_on_their_pages_each_with_its_own_edge_round_it() {
+        let mut rng = crate::rng::Rng::new(5);
+        let pictures: Vec<ImageSurface> = (0..120)
+            .map(|k| {
+                let (w, h) = (rng.int(1, 300) as i32, rng.int(1, 300) as i32);
+                let mut s = crate::util::surface(w, h);
+                let stride = s.stride() as usize;
+                if let Some(mut d) = crate::util::view(&mut s) {
+                    for y in 0..h as usize {
+                        for x in 0..w as usize {
+                            d[y * stride + x * 4..y * stride + x * 4 + 4].copy_from_slice(&[(x % 256) as u8, (y % 256) as u8, k as u8, 255]);
+                        }
+                    }
+                }
+                s
+            })
+            .collect();
+        let list: Vec<(usize, &ImageSurface)> = pictures.iter().enumerate().collect();
+        let (places, pages) = pack(&list);
+        assert_eq!(places.len(), pictures.len(), "all fit");
+        let data: Vec<(Vec<u8>, usize)> = pages
+            .iter()
+            .map(|p| {
+                let mut v = vec![];
+                let _ = p.with_data(|d| v = d.to_vec());
+                (v, p.stride() as usize)
+            })
+            .collect();
+        let mut taken: Vec<(usize, i32, i32, i32, i32)> = vec![];
+        for &(i, page, px, py) in &places {
+            let s = &pictures[i];
+            let (w, h) = (s.width(), s.height());
+            let (d, stride) = &data[page];
+            for row in -1..=h {
+                for col in -1..=w {
+                    let at = (py + 1 + row) as usize * stride + (px + 1 + col) as usize * 4;
+                    let (x, y) = (col.clamp(0, w - 1) as usize, row.clamp(0, h - 1) as usize);
+                    assert_eq!(&d[at..at + 4], &[(x % 256) as u8, (y % 256) as u8, i as u8, 255], "picture {i} at {col}, {row}");
+                }
+            }
+            for &(p, x0, y0, x1, y1) in &taken {
+                assert!(p != page || px + w + 2 <= x0 || x1 <= px || py + h + 2 <= y0 || y1 <= py, "picture {i} overlaps another");
+            }
+            taken.push((page, px, py, px + w + 2, py + h + 2));
+        }
     }
 }

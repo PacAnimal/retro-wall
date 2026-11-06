@@ -48,5 +48,6 @@ pub mod sources;
 pub mod still;
 pub mod svg;
 pub mod title;
+pub mod trace;
 pub mod tweaks;
 pub mod util;

@@ -42,9 +42,7 @@ pub fn set_wallpaper(th: &Theme, desktop: &dyn Desktop, s: &Screen, picture: &mu
     let path = dir.join(format!("wallpaper-{name}-{h:016x}.png"));
     if !path.exists() {
         let tmp = path.with_extension("tmp");
-        if let Ok(mut f) = std::fs::File::create(&tmp)
-            && picture.write_to_png(&mut f).is_ok()
-        {
+        if crate::util::write_png(picture, &tmp) {
             let _ = std::fs::rename(&tmp, &path);
         }
     }

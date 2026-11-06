@@ -499,6 +499,11 @@ pub struct Config {
     pub monitors: Option<Table>,
     pub sources: Table,
     pub monitor_groups: BTreeMap<String, Vec<Group>>,
+    /// Settings of the theme's elements and its tweaks, over the theme's own: what to hide, move or
+    /// change in any theme, without a theme of one's own. Each checked as the theme's are, when the
+    /// theme is resolved: what does not check is said and left out.
+    pub elements: BTreeMap<String, Table>,
+    pub tweaks: Table,
     /// What was wrong in it, each item left out.
     pub problems: Vec<String>,
     pub path: Option<PathBuf>,
@@ -588,7 +593,7 @@ pub fn read_config(path: Option<&str>) -> R<Config> {
     let d = read_toml(&path)?;
     let at = path.display().to_string();
     let mut l = Lenient { at: &at, problems: vec![] };
-    let known = ["theme", "host", "scanlines", "group", "widget", "monitors", "monitor", "source"];
+    let known = ["theme", "host", "scanlines", "group", "widget", "monitors", "monitor", "source", "element", "tweaks"];
     for k in d.keys().filter(|k| !known.contains(&k.as_str())) {
         l.note(format!("{at}: unknown {k} (it has {})", known.join(", ")));
     }
@@ -654,8 +659,20 @@ pub fn read_config(path: Option<&str>) -> R<Config> {
             Err(e) => l.note(e),
         }
     }
+    let mut elements = BTreeMap::new();
+    for (name, t) in l.table(&d, "element").into_iter().flatten() {
+        match t {
+            Value::Table(t) => {
+                elements.insert(name.clone(), t.clone());
+            }
+            _ => l.note(format!("{at}: element.{name} is a table of its settings")),
+        }
+    }
+    let tweaks = l.table(&d, "tweaks").cloned().unwrap_or_default();
     let groups = d.get("group").and_then(|g| l.groups(g, &at));
     Ok(Config {
+        elements,
+        tweaks,
         theme,
         host,
         scanlines,
@@ -768,6 +785,20 @@ pub fn resolve(spec: &str, cfg: &Config, kinds: Kinds, battery: bool) -> R<Loade
     if let Some(s) = cfg.scanlines {
         tweaks.insert("scanlines".into(), Value::Boolean(s));
     }
+    // retro.toml's tweaks, over the theme's, in each of its looks too; each that does not check said and
+    // left out
+    let mut user_said = vec![];
+    for (k, v) in &cfg.tweaks {
+        match tweak(&tweaks, k, v, &cfg.at()) {
+            Ok(f) => {
+                tweaks.insert(k.clone(), f.clone());
+                for look in looks.values_mut() {
+                    look.1.insert(k.clone(), f.clone());
+                }
+            }
+            Err(e) => user_said.push(format!("{e}: left out")),
+        }
+    }
 
     // the scene: each element against its kind's settings
     let scene = scene.unwrap_or_else(|| ["sky", "mountains", "title", "instruments", "finish", "ruler"].iter().map(|s| s.to_string()).collect());
@@ -790,7 +821,34 @@ pub fn resolve(spec: &str, cfg: &Config, kinds: Kinds, battery: bool) -> R<Loade
             merged.insert(k.clone(), fits(v, d, &format!("{spec}: element.{n}.{k}"), info.varies.contains(&k.as_str()))?);
         }
         (info.check)(&merged).map_err(|e| ThemeError(format!("{spec}: element.{n}: {e}")))?;
+        // retro.toml's settings for it, over the theme's: each checked as the theme's are; where they
+        // break it, the theme's own kept
+        if let Some(user) = cfg.elements.get(n) {
+            let at = format!("{}: element.{n}", cfg.at());
+            let mut theirs = merged.clone();
+            for (k, v) in user {
+                match info.defaults.get(k) {
+                    _ if k == "type" => user_said.push(format!("{at}.type: an element's kind is the theme's: left out")),
+                    None => {
+                        user_said.push(format!("{at}: no setting {k:?} (it has {}): left out", info.defaults.keys().cloned().collect::<Vec<_>>().join(", ")))
+                    }
+                    Some(d) => match fits(v, d, &format!("{at}.{k}"), info.varies.contains(&k.as_str())) {
+                        Ok(f) => {
+                            theirs.insert(k.clone(), f);
+                        }
+                        Err(e) => user_said.push(format!("{e}: left out")),
+                    },
+                }
+            }
+            match (info.check)(&theirs) {
+                Ok(()) => merged = theirs,
+                Err(e) => user_said.push(format!("{at}: {e}: your settings for it left out")),
+            }
+        }
         made.push(Element { name: n.clone(), kind, settings: merged });
+    }
+    for n in cfg.elements.keys().filter(|n| !scene.contains(n)) {
+        user_said.push(format!("{}: element.{n}: {spec}'s scene has no {n:?} (it has {}): left out", cfg.at(), scene.join(", ")));
     }
     for (n, t) in &settings {
         if !scene.contains(n) {
@@ -902,6 +960,11 @@ pub fn resolve(spec: &str, cfg: &Config, kinds: Kinds, battery: bool) -> R<Loade
     let mut said = vec![];
     for p in problems {
         let p = format!("{}: {p}", cfg.at());
+        if !said.contains(&p) {
+            said.push(p);
+        }
+    }
+    for p in user_said {
         if !said.contains(&p) {
             said.push(p);
         }

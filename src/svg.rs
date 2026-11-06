@@ -667,6 +667,43 @@ pub fn kept(path: &Path, width: i32, height: i32, kind: &str, tag: &str, make: i
     s
 }
 
+/// As `kept`, for bytes worked out for a screen size: a theme's own (`path` its theme.toml, say), made
+/// once and read back on every later start. Stored deflated. The caller checks what it reads back.
+pub fn kept_bytes(path: &Path, width: i32, height: i32, kind: &str, tag: &str, make: impl FnOnce() -> Vec<u8>) -> Vec<u8> {
+    if let Some(v) = kept_read(path, width, height, kind, tag) {
+        return v;
+    }
+    let v = make();
+    keep(path, width, height, kind, tag, &v);
+    v
+}
+
+/// The bytes `kept_bytes` keeps, as kept; None where there are none. With `keep`, for bytes read
+/// while something else is made.
+pub fn kept_read(path: &Path, width: i32, height: i32, kind: &str, tag: &str) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let (at, _) = kept_name(path, width, height, kind, tag, "bin")?;
+    let f = std::fs::File::open(at).ok()?;
+    let mut out = vec![];
+    flate2::read::DeflateDecoder::new(std::io::BufReader::new(f)).read_to_end(&mut out).ok()?;
+    Some(out)
+}
+
+/// Keep bytes as `kept_bytes` does.
+pub fn keep(path: &Path, width: i32, height: i32, kind: &str, tag: &str, v: &[u8]) {
+    use std::io::Write;
+    if let Some((at, same)) = kept_name(path, width, height, kind, tag, "bin")
+        && std::fs::create_dir_all(at.parent().unwrap()).is_ok()
+        && write_whole(&at, |part| {
+            let Ok(f) = std::fs::File::create(part) else { return false };
+            let mut z = flate2::write::DeflateEncoder::new(std::io::BufWriter::new(f), flate2::Compression::fast());
+            z.write_all(v).is_ok() && z.finish().is_ok_and(|mut w| w.flush().is_ok())
+        })
+    {
+        prune(at.parent().unwrap(), &same, &at);
+    }
+}
+
 /// As `kept`, for a text value made from a picture.
 pub fn kept_value(path: &Path, width: i32, height: i32, kind: &str, tag: &str, make: impl FnOnce() -> String) -> String {
     let place = kept_name(path, width, height, kind, tag, "txt");

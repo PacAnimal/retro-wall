@@ -417,8 +417,8 @@ impl Farm<'_> {
         [self.c.0 as f64 + dx + 0.5, y, self.c.1 as f64 + dz + 0.5]
     }
 
-    /// A chimney of cobblestone up from (dx, dz) inside a house, through its roof and a block past it;
-    /// smoke rises from it.
+    /// A chimney of cobblestone up from (dx, dz) inside a house, through its roof and a block past it,
+    /// open at its top; smoke rises from it.
     fn chimney(&mut self, dx: i32, dz: i32) {
         let mut y = ON;
         let mut roofed = false;
@@ -428,7 +428,7 @@ impl Farm<'_> {
             self.put(dx, y, dz, COBBLE);
             y += 1;
             if (roofed && self.get(dx, y, dz) == AIR) || y > ON + 16 {
-                self.put(dx, y, dz, COBBLE);
+                self.put(dx, y, dz, CHIMNEY_TOP);
                 break;
             }
         }

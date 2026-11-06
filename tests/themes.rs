@@ -270,6 +270,38 @@ fn a_users_settings_that_check_are_kept() {
     assert_eq!(l.plain.widgets["cpu"]["label"].as_str(), Some("LOAD"));
 }
 
+#[test]
+fn a_config_sets_a_themes_elements_and_tweaks() {
+    // hide blocky's interface and change a tweak, without a theme of one's own: in every look
+    let path = scratch("config-elements", &[]).join("retro.toml");
+    std::fs::write(&path, "[element.world]\nui = false\n[tweaks]\nvignette = 0.125\n").unwrap();
+    let cfg = config::read_config(Some(path.to_str().unwrap())).unwrap();
+    assert!(cfg.problems.is_empty(), "{:?}", cfg.problems);
+    let l = config::load(&bundled("blocky"), &cfg, elements::kind_info, false).unwrap();
+    assert!(l.problems.is_empty(), "{:?}", l.problems);
+    for th in l.looks.iter().flat_map(|looks| looks.values()).chain([&l.plain]) {
+        let world = th.scene.iter().find(|e| e.name == "world").expect("blocky's world");
+        assert_eq!(world.settings["ui"].as_bool(), Some(false));
+        assert_eq!(th.tw.vignette, 0.125);
+    }
+}
+
+#[test]
+fn a_configs_element_settings_that_do_not_check_are_said_and_left_out() {
+    let path = scratch("config-elements-bad", &[]).join("retro.toml");
+    std::fs::write(&path, "[element.world]\nui = \"no\"\nhand = true\nbogus = 1\ntype = \"sky\"\n[element.nowhere]\nx = 1\n[tweaks]\nvignete = 0.2\n").unwrap();
+    let cfg = config::read_config(Some(path.to_str().unwrap())).unwrap();
+    let l = config::load(&bundled("blocky"), &cfg, elements::kind_info, false).unwrap_or_else(|e| panic!("{e}"));
+    let said = l.problems.join("\n");
+    for what in ["element.world.ui", "\"bogus\"", "element.world.type", "element.nowhere", "tweaks.vignete"] {
+        assert!(said.contains(what), "{what} not said in:\n{said}");
+    }
+    assert!(l.problems.iter().all(|p| p.ends_with("left out")), "{said}");
+    // what checks is kept
+    let world = l.plain.scene.iter().find(|e| e.name == "world").unwrap();
+    assert_eq!((world.settings["hand"].as_bool(), world.settings["ui"].as_bool()), (Some(true), Some(true)));
+}
+
 /// The binary, with this scratch directory as its config home; (exit code, standard error).
 fn run_with_config(home: &Path, themes: Option<&Path>, exe: &Path, a: &[&str]) -> (i32, String) {
     let mut run = std::process::Command::new(exe);

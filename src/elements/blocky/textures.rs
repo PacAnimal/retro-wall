@@ -119,6 +119,9 @@ pub const CAMPFIRE: usize = 55;
 pub const OAK_LYING: usize = 56;
 /// Rails running along x; `RAIL` runs along z.
 pub const RAIL_X: usize = 57;
+pub const TORCH_TOP: usize = 58;
+pub const LANTERN_TOP: usize = 59;
+pub const CHIMNEY_TOP: usize = 60;
 
 pub struct Textures {
     pub all: Vec<Texture>,
@@ -571,17 +574,30 @@ fn crop(rng: &mut Rng, stalks: &[u32], tall: (usize, usize), accent: &[u32], at:
     px
 }
 
-fn torch() -> Vec<Rgba> {
-    let mut px = vec![[0.0; 4]; N * N];
-    for y in 6..N {
-        for x in 7..9 {
-            px[y * N + x] = opaque(hex(if x == 7 { 0x896727 } else { 0x5c4418 }));
+/// Pixel art from rows of characters, each a colour in its palette ('.' clear), at its top left.
+fn drawn(px: &mut [Rgba], x0: usize, y0: usize, rows: &[&str], palette: &[(char, u32)]) {
+    for (j, row) in rows.iter().enumerate() {
+        for (i, ch) in row.chars().enumerate() {
+            if let Some(&(_, c)) = palette.iter().find(|p| p.0 == ch) {
+                px[(y0 + j) * N + x0 + i] = opaque(hex(c));
+            }
         }
     }
-    // the flame, also what the top shows
-    for (x, y, c) in [(7, 6, 0xfff6c0), (8, 6, 0xffe080), (7, 7, 0xffd040), (8, 7, 0xffb020), (7, 8, 0xffe080), (8, 8, 0xffc040)] {
-        px[y * N + x] = opaque(hex(c));
-    }
+}
+
+/// A torch's sides: a stick two pixels square, lit on its left, and its head at the top: two rows of
+/// flame, white-hot over yellow, and an ember's row of orange under them.
+fn torch() -> Vec<Rgba> {
+    let mut px = vec![[0.0; 4]; N * N];
+    let rows = ["Wy", "yo", "oe", "hb", "hb", "hb", "hb", "hb", "hb", "db"];
+    drawn(&mut px, 7, 6, &rows, &[('W', 0xfff4a8), ('y', 0xffd848), ('o', 0xffa21c), ('e', 0xe4641a), ('h', 0x8f6a2e), ('b', 0x5e4419), ('d', 0x765627)]);
+    px
+}
+
+/// Its top: the flame seen from above, hottest in a corner.
+fn torch_top() -> Vec<Rgba> {
+    let mut px = vec![[0.0; 4]; N * N];
+    drawn(&mut px, 7, 7, &["Wy", "yo"], &[('W', 0xfff4a8), ('y', 0xffd848), ('o', 0xffb02a)]);
     px
 }
 
@@ -664,20 +680,41 @@ fn rail() -> Vec<Rgba> {
         .collect()
 }
 
+/// The lantern's iron, dark and its lit edges, and its light, hot in the middle.
+const LANTERN_COLOURS: [(char, u32); 7] =
+    [('K', 0x24242c), ('k', 0x484854), ('o', 0xe8862a), ('y', 0xffc850), ('W', 0xffeca0), ('d', 0xc86420), ('g', 0x34343e)];
+
+/// A lantern's sides (`world::boxes`): its loop of a handle, a cap, and under it a cage of dark iron, six
+/// pixels by seven, its light through its panes.
 fn lantern() -> Vec<Rgba> {
+    let mut px = vec![[0.0; 4]; N * N];
+    let rows = [".KKKK.", ".K..K.", ".kkkk.", ".KKKK.", "KkkkkK", "KoyyoK", "KyWWyK", "KyWWyK", "KoyyoK", "KdoodK", "KKggKK"];
+    drawn(&mut px, 5, 5, &rows, &LANTERN_COLOURS);
+    px
+}
+
+/// Its top and bottom: the iron of the cage, the cap within it and the handle across that.
+/// A chimney's top: a rim of its cobblestone `stone` about a dark opening, sooty at its edge. The rim
+/// a pixel wide: seen from the side, the top is a texel or two high, and a wider rim greyed it out.
+fn chimney_top(stone: &[Rgba]) -> Vec<Rgba> {
     (0..N * N)
         .map(|i| {
             let (x, y) = (i % N, i / N);
-            if !(5..11).contains(&x) || y < 6 {
-                return [0.0; 4];
-            }
-            if y == 6 || y == 15 || x == 5 || x == 10 {
-                opaque(hex(0x3a3a44))
-            } else {
-                opaque(hex(if (7..9).contains(&x) && (9..13).contains(&y) { 0xfff2b0 } else { 0xffb848 }))
+            let ring = x.min(y).min(N - 1 - x).min(N - 1 - y);
+            match ring {
+                0 => stone[i],
+                1 => opaque(hex(0x2b2b2b)),
+                _ => opaque(hex(0x0e0e0e)),
             }
         })
         .collect()
+}
+
+fn lantern_top() -> Vec<Rgba> {
+    let mut px = vec![[0.0; 4]; N * N];
+    let rows = ["KKKKKK", "KkkkkK", "KKKKKK", "KKKKKK", "KkkkkK", "KKKKKK"];
+    drawn(&mut px, 5, 5, &rows, &LANTERN_COLOURS);
+    px
 }
 
 fn lily(rng: &mut Rng) -> Vec<Rgba> {
@@ -695,8 +732,9 @@ fn lily(rng: &mut Rng) -> Vec<Rgba> {
         .collect()
 }
 
-fn campfire(rng: &mut Rng) -> Vec<Rgba> {
-    let mut px = blades(rng, &[0xd84a10, 0xf08020, 0xffb040, 0xffe080], 12, (4, 11));
+/// A campfire's logs; its flames are drawn live, at night only (`life::flames`).
+fn campfire() -> Vec<Rgba> {
+    let mut px = vec![[0.0; 4]; N * N];
     for y in 12..N {
         for x in 0..N {
             px[y * N + x] = opaque(hex(if (x / 3 + y) % 2 == 0 { 0x5a4024 } else { 0x3a2a16 }));
@@ -774,10 +812,14 @@ impl Textures {
             Texture::new(rail()),
             Texture::new(lantern()),
             Texture::new(lily(r)),
-            Texture::new(campfire(r)),
+            Texture::new(campfire()),
             Texture::new(turned(&oak_bark)),
             Texture::new(turned(&rail())),
+            Texture::new(torch_top()),
+            Texture::new(lantern_top()),
         ];
+        let mut all = all;
+        all.push(Texture::new(chimney_top(&all[COBBLE].levels[0])));
         Textures { all }
     }
 }

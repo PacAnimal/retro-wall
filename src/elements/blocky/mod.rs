@@ -221,6 +221,8 @@ pub struct Blocky {
     herd_now: u64,
     herd_shown: Option<u64>,
     glades: Vec<(V3, f64)>,
+    /// The fires the camera sees, for their flames at night (`life::flames`).
+    fires: Vec<V3>,
     clouds: Vec<bool>,
     cloud_tex: Option<Tex>,
     programs: [Option<Option<Program>>; 3],
@@ -253,6 +255,7 @@ impl Blocky {
             land: None,
             smoke: vec![],
             glades: vec![],
+            fires: vec![],
             herd: None,
             herd_now: 0,
             herd_shown: None,
@@ -276,26 +279,79 @@ impl Blocky {
             return;
         }
         let yaw = self.s.yaw.to_radians();
-        let w = world::World::new(self.seed, (yaw.sin(), yaw.cos()));
+        let s = &self.s;
+        let tag = format!("{} {} {} {} {} {} {}", self.seed, s.yaw, s.pitch, s.fov, s.samples, s.distance, s.hand);
+        let theme = g.th.dirs.first().map(|d| d.join("theme.toml"));
+        // the world made (lit only to be traced) while what the cache keeps is read
+        let seed = self.seed;
+        let (mut w, kept) = std::thread::scope(|sc| {
+            let world = sc.spawn(move || world::World::unlit(seed, (yaw.sin(), yaw.cos())));
+            let kept = theme.as_ref().and_then(|t| crate::svg::kept_read(t, g.w, g.h, "blocky", &tag));
+            (world.join().unwrap_or_else(|e| std::panic::resume_unwind(e)), kept)
+        });
         let tex = textures::Textures::new(self.seed);
         let cam = Camera::new(w.eye, yaw, self.s.pitch.to_radians(), self.s.fov, g.w.max(1) as usize, g.h.max(1) as usize);
         self.cam = Some(cam);
-        let tracer = Tracer::new(&w, &tex, cam, (self.s.distance * 0.7, self.s.distance), sky::arcs(&cam), self.s.hand);
-        let mut frame = tracer.render(self.s.samples.round() as usize);
+        let fog = (self.s.distance * 0.7, self.s.distance);
+        // the traced picture and the depths under the animals, kept in the theme's cache: tracing them
+        // takes seconds on a small machine, and they are the same each start
+        let trace = |w: &mut world::World| {
+            w.light_up();
+            let tracer = Tracer::new(w, &tex, cam, fog, sky::arcs(&cam), self.s.hand);
+            let frame = tracer.render(self.s.samples.round() as usize);
+            let herd = herd::Herd::new(w, fog, &frame, &cam, self.seed, |x, y| tracer.depth(x as f64 + 0.5, y as f64 + 0.5));
+            let mut bytes = [frame.base, frame.light, frame.sun].concat();
+            bytes.extend(herd.depths().flat_map(f32::to_le_bytes));
+            bytes
+        };
+        let (mut frame, herd) = match kept.and_then(|bytes| self.unpack(&w, fog, &cam, &bytes)) {
+            Some(both) => both,
+            None => {
+                let bytes = trace(&mut w);
+                if let Some(t) = &theme {
+                    crate::svg::keep(t, g.w, g.h, "blocky", &tag, &bytes);
+                }
+                self.unpack(&w, fog, &cam, &bytes).expect("a fresh trace unpacks")
+            }
+        };
         // the wandering animals, where they start, into the still picture
-        let herd = herd::Herd::new(&w, &tracer, &frame, &cam, self.seed);
+        let mut herd = herd;
         herd.paint_into(&cam, &mut frame, cam.w);
         self.herd = Some(herd);
         self.frame = Some(frame);
         (self.smoke, self.glades) = (w.smoke.clone(), w.glades.clone());
+        self.fires = w.smoke.iter().filter(|&&(p, chimney)| !chimney && seen(&w, cam.eye, p)).map(|&(p, _)| [p[0], p[1] - 0.6, p[2]]).collect();
         if self.s.ui {
             // the HUD over a panel at the screen's foot, never under it; the arm, in the scene, stays put
             let layout = hud::Layout::new(g.w as f64, g.h as f64, g.edges.bottom as f64, self.s.gui_scale);
             let bar = surface(layout.hotbar.2.ceil() as i32, layout.hotbar.3.ceil() as i32);
-            hud::paint_hotbar(&ctx(&bar), &layout, &tex);
+            hud::paint_hotbar(&ctx(&bar), &layout);
             self.layout = Some(layout);
             self.hotbar = Some(bar);
         }
+    }
+
+    /// The picture and the herd from `trace`'s bytes: the three pictures, then the depths the herd asks
+    /// for; None where they are not as many as this screen and world need.
+    fn unpack(&self, w: &world::World, fog: (f64, f64), cam: &Camera, bytes: &[u8]) -> Option<(render::Frame, herd::Herd)> {
+        let n = cam.w * cam.h * 4;
+        if bytes.len() < n * 3 {
+            return None;
+        }
+        let frame = render::Frame { base: bytes[..n].to_vec(), light: bytes[n..n * 2].to_vec(), sun: bytes[n * 2..n * 3].to_vec() };
+        let (chunks, rest) = bytes[n * 3..].as_chunks::<4>();
+        if !rest.is_empty() {
+            return None;
+        }
+        let mut depths = chunks.iter().map(|&b| f32::from_le_bytes(b));
+        let mut short = false;
+        let herd = herd::Herd::new(w, fog, &frame, cam, self.seed, |_, _| {
+            depths.next().unwrap_or_else(|| {
+                short = true;
+                f32::INFINITY
+            })
+        });
+        (!short && depths.next().is_none()).then_some((frame, herd))
     }
 
     fn moment(&self) -> Option<Moment> {
@@ -413,17 +469,7 @@ impl Part for Blocky {
         }
         self.cloud_tex = Some(up.add(map, Kind::Label));
         if let Some(frame) = self.frame.take() {
-            let picture = |bytes: Vec<u8>| {
-                let mut s = surface(g.w, g.h);
-                let stride = s.stride() as usize;
-                if let Some(mut d) = view(&mut s) {
-                    for (row, src) in bytes.chunks(g.w as usize * 4).enumerate() {
-                        d[row * stride..row * stride + src.len()].copy_from_slice(src);
-                    }
-                }
-                s
-            };
-            self.land = Some([frame.base, frame.light, frame.sun].map(|bytes| up.add(picture(bytes), Kind::Label)));
+            self.land = Some([frame.base, frame.light, frame.sun].map(|bytes| up.add(picture(&bytes, g.w, g.h), Kind::Label)));
         }
         if let Some(bar) = self.hotbar.take() {
             self.hotbar_tex = Some(up.add(bar, Kind::Label));
@@ -488,18 +534,11 @@ impl Part for Blocky {
                 let Some(land) = self.land else { return };
                 // the animals' patches, where they have moved
                 if self.herd_shown != Some(self.herd_now)
-                    && let (Some(herd), Some(cam)) = (&self.herd, self.cam)
+                    && let (Some(herd), Some(cam)) = (&mut self.herd, self.cam)
                 {
                     for (x, y, w, h, pics) in herd.paint(&cam) {
                         for (pic, tex) in pics.into_iter().zip(land) {
-                            let mut s = surface(w, h);
-                            let stride = s.stride() as usize;
-                            if let Some(mut d) = view(&mut s) {
-                                for (row, src) in pic.chunks(w as usize * 4).enumerate() {
-                                    d[row * stride..row * stride + src.len()].copy_from_slice(src);
-                                }
-                            }
-                            gfx.replace_at(tex, &s, x, y);
+                            gfx.replace_bytes(tex, &pic, x, y, w, h);
                         }
                     }
                     self.herd_shown = Some(self.herd_now);
@@ -520,8 +559,12 @@ impl Part for Blocky {
             }
             3 => {
                 let Some(cam) = self.cam else { return };
-                let (puffs, grey) = life::smoke(&cam, &self.smoke, self.t, &m);
-                gfx.rects(None, &puffs, grey, Blend::Alpha);
+                let (outer, inner) = life::flames(&cam, &self.fires, self.t, &m);
+                gfx.rects(None, &outer, (0.95, 0.45, 0.1), Blend::Alpha);
+                gfx.rects(None, &inner, (1.0, 0.85, 0.35), Blend::Alpha);
+                for (puffs, grey) in life::smoke(&cam, &self.smoke, self.t, &m) {
+                    gfx.rects(None, &puffs, grey, Blend::Alpha);
+                }
                 let (glow, core) = life::fireflies(&cam, &self.glades, self.t, &m);
                 gfx.rects(None, &glow, (0.8, 1.0, 0.4), Blend::Alpha);
                 gfx.rects(None, &core, (0.92, 1.0, 0.6), Blend::Alpha);
@@ -548,59 +591,66 @@ impl Part for Blocky {
         let (Some(cam), Some(m)) = (self.cam, self.moment()) else { return };
         let (w, h) = (g.w.max(1) as usize, g.h.max(1) as usize);
         let byte = |v: f64| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
-        // each pass's picture, pixel by pixel, as its shader draws it
         let mut pic = surface(w as i32, h as i32);
         let stride = pic.stride() as usize;
-        match k {
-            0 => {
-                if let Some(mut d) = view(&mut pic) {
-                    for y in 0..h {
-                        for x in 0..w {
-                            let s = sky::sky_at(&m, cam.ray(x as f64 + 0.5, y as f64 + 0.5));
-                            d[y * stride + x * 4..y * stride + x * 4 + 4].copy_from_slice(&[byte(s.2), byte(s.1), byte(s.0), 255]);
+        // where the land is opaque it is all that shows: the sky and the clouds there are not worked out
+        let cover = self.frame.as_ref().map(|f| &f.base);
+        let under = |x: usize, y: usize| cover.is_some_and(|b| b[(y * w + x) * 4 + 3] == 255);
+        // each pass's picture, pixel by pixel, as its shader draws it, its rows on every core
+        let mut paint = |fill: &(dyn Fn(usize, usize) -> Option<[u8; 4]> + Sync)| {
+            if let Some(mut d) = view(&mut pic) {
+                crate::trace::rows([&mut d[..]], stride, |y, [row]| {
+                    for x in 0..w {
+                        if let Some(px) = fill(x, y) {
+                            row[x * 4..x * 4 + 4].copy_from_slice(&px);
                         }
                     }
-                }
+                });
             }
+        };
+        match k {
+            0 => paint(&|x, y| {
+                if under(x, y) {
+                    return None;
+                }
+                let s = sky::sky_at(&m, cam.ray(x as f64 + 0.5, y as f64 + 0.5));
+                Some([byte(s.2), byte(s.1), byte(s.0), 255])
+            }),
             1 => {
                 let rows = (self.cloud_rows(g).ceil() as usize).min(h);
-                let shift = self.shift();
-                if let Some(mut d) = view(&mut pic) {
-                    for y in 0..rows {
-                        for x in 0..w {
-                            let mut sum = [0.0; 4];
-                            for (ox, oy) in [(-0.25, -0.25), (0.25, -0.25), (-0.25, 0.25), (0.25, 0.25)] {
-                                let c = cloud_at(&self.clouds, cam.eye, cam.ray(x as f64 + 0.5 + ox, y as f64 + 0.5 + oy), shift, &m);
-                                for i in 0..4 {
-                                    sum[i] += c[i] / 4.0;
-                                }
-                            }
-                            d[y * stride + x * 4..y * stride + x * 4 + 4].copy_from_slice(&[byte(sum[2]), byte(sum[1]), byte(sum[0]), byte(sum[3])]);
+                let (shift, clouds) = (self.shift(), &self.clouds);
+                paint(&|x, y| {
+                    if y >= rows || under(x, y) {
+                        return None;
+                    }
+                    let mut sum = [0.0; 4];
+                    for (ox, oy) in [(-0.25, -0.25), (0.25, -0.25), (-0.25, 0.25), (0.25, 0.25)] {
+                        let c = cloud_at(clouds, cam.eye, cam.ray(x as f64 + 0.5 + ox, y as f64 + 0.5 + oy), shift, &m);
+                        for i in 0..4 {
+                            sum[i] += c[i] / 4.0;
                         }
                     }
-                }
+                    Some([byte(sum[2]), byte(sum[1]), byte(sum[0]), byte(sum[3])])
+                });
             }
             2 => {
                 let Some(frame) = &self.frame else { return };
-                if let Some(mut d) = view(&mut pic) {
-                    for y in 0..h {
-                        for x in 0..w {
-                            let i = (y * w + x) * 4;
-                            let a = frame.base[i + 3];
-                            if a == 0 {
-                                continue;
-                            }
-                            let f = |v: u8| v as f64 / 255.0;
-                            let base = [f(frame.base[i + 2]), f(frame.base[i + 1]), f(frame.base[i]), f(a)];
-                            let light = [f(frame.light[i + 2]), f(frame.light[i + 1]), f(frame.light[i])];
-                            let (px, py) = (x as f64 + 0.5, y as f64 + 0.5);
-                            let sun = (frame.sun[i], frame.sun[i + 1]);
-                            let mat = ((frame.sun[i + 2] as f64) / 40.0).round() as u8;
-                            let o = sky::shown(&m, base, light, sun, mat, sky::flicker(px, py, self.t));
-                            d[y * stride + x * 4..y * stride + x * 4 + 4].copy_from_slice(&[byte(o[2]), byte(o[1]), byte(o[0]), a]);
-                        }
+                let t = self.t;
+                paint(&|x, y| {
+                    let i = (y * w + x) * 4;
+                    let a = frame.base[i + 3];
+                    if a == 0 {
+                        return None;
                     }
-                }
+                    let f = |v: u8| v as f64 / 255.0;
+                    let base = [f(frame.base[i + 2]), f(frame.base[i + 1]), f(frame.base[i]), f(a)];
+                    let light = [f(frame.light[i + 2]), f(frame.light[i + 1]), f(frame.light[i])];
+                    let (px, py) = (x as f64 + 0.5, y as f64 + 0.5);
+                    let sun = (frame.sun[i], frame.sun[i + 1]);
+                    let mat = ((frame.sun[i + 2] as f64) / 40.0).round() as u8;
+                    let o = sky::shown(&m, base, light, sun, mat, sky::flicker(px, py, t));
+                    Some([byte(o[2]), byte(o[1]), byte(o[0]), a])
+                });
             }
             // what moves is left out of the still picture
             3 => return,
@@ -654,6 +704,23 @@ level = "used""##,
     }]
 }
 
+/// Whether the camera at `eye` sees the point `p` of the world: no whole block between them past the
+/// one `p` is in. Flames are drawn over the picture, so a fire behind a house must not show.
+fn seen(w: &world::World, eye: V3, p: V3) -> bool {
+    let d = [eye[0] - p[0], eye[1] - p[1], eye[2] - p[2]];
+    let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+    let mut s = 0.75;
+    while s < len {
+        let q = [p[0] + d[0] / len * s, p[1] + d[1] / len * s, p[2] + d[2] / len * s];
+        let b = w.get(q[0].floor() as i32, q[1].floor() as i32, q[2].floor() as i32);
+        // whole blocks only: a lantern, a fence or a slab fills little of its cell
+        if world::block(b).shape == world::Shape::Cube {
+            return false;
+        }
+        s += 0.05;
+    }
+    true
+}
 #[cfg(test)]
 mod tests {
     use super::*;

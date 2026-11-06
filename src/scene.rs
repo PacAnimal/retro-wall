@@ -330,8 +330,16 @@ pub fn moves(p: &dyn Part) -> bool {
     p.passes().iter().any(|x| matches!(x, Pass::Live(_)))
 }
 
+/// A number into a part's `state` hash.
 pub fn hash_f(h: &mut u64, v: f64) {
     *h = h.wrapping_mul(0x100000001b3) ^ v.to_bits();
+}
+
+/// Quads (`Gfx::draw`'s floats) into a part's `state` hash: what it draws is what it shows.
+pub fn hash_verts(h: &mut u64, d: &[f32]) {
+    for v in d {
+        *h = (*h ^ v.to_bits() as u64).wrapping_mul(0x100000001b3);
+    }
 }
 
 /// One entry of a frame's plan: a run of still layers as one texture, or a part's live pass.
