@@ -326,6 +326,30 @@ pub fn pose(kind: Kind, at: [f64; 3], yaw: f64, walk: Walk, o: [f64; 3]) -> Pose
     Pose::new(parts, at, yaw, 16.0, o)
 }
 
+/// The same, turned any way (its own axes, across, up and forward, as the world's `axes`), its head
+/// nodded down by `nod` radians about its neck: a pig that walks up walls, upside down under a roof,
+/// tumbles head over heels and eats. Its feet at `at`.
+pub fn pose_turned(kind: Kind, at: [f64; 3], axes: [[f64; 3]; 3], walk: Walk, nod: f64, o: [f64; 3]) -> Pose {
+    let neck = neck(kind);
+    let parts = model(kind).iter().enumerate().map(|(pi, p)| {
+        let hinge = match neck {
+            Some((first, pivot)) if pi >= first => Hinge { axis: 0, pivot, angle: nod },
+            _ => Hinge { axis: 0, pivot: [0.0, p.hi[1], (p.lo[2] + p.hi[2]) * 0.5], angle: swing(kind, pi, walk) },
+        };
+        (p.lo, p.hi, Some(hinge))
+    });
+    Pose::oriented(parts, at, axes, 16.0, o)
+}
+
+/// Where a kind's head turns: its first part of the head (all after it are the head's too) and the
+/// pivot, at the back of its jaw. None for those whose head stays put.
+fn neck(kind: Kind) -> Option<(usize, [f64; 3])> {
+    match kind {
+        Kind::Pig => Some((5, [0.0, 9.0, 8.0])),
+        _ => None,
+    }
+}
+
 /// What the ray from the eye along `d` meets of a mob of a kind at `at`, posed (`pose`): how far, its colour
 /// there and its normal.
 pub fn seen(kind: Kind, at: [f64; 3], pose: &Pose, d: [f64; 3]) -> Option<MobHit> {

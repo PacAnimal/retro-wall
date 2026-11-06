@@ -732,12 +732,33 @@ fn lily(rng: &mut Rng) -> Vec<Rgba> {
         .collect()
 }
 
-/// A campfire's logs; its flames are drawn live, at night only (`life::flames`).
+/// A campfire's logs, as each of its two crossed pictures shows them: a log lying across at the foot, the
+/// cut ends of two lying over it at either side, and between them the embers, whose bright ones glow at
+/// night. Its flames are drawn live, at night only (`life::flames`).
 fn campfire() -> Vec<Rgba> {
+    // . clear; b, B, d bark and its dark edge; r, R the cut end's rings, c its heart; e, E, k, a embers
+    // (glowing, brighter, dark, ash)
+    const ART: [&str; 7] =
+        [".dddd......dddd.", "drRrd......dRrrd", "dRcRdkeaEeadrcRd", "drRrdeEkeEkdRrrd", ".dddddddddddddd.", "dbBbbBbbBbBbbBbd", "dddddddddddddddd"];
+    let colour = |ch: char| match ch {
+        'b' => Some(0x5a4428),
+        'B' => Some(0x6b5230),
+        'd' => Some(0x33251a),
+        'r' => Some(0xae8c58),
+        'R' => Some(0x977546),
+        'c' => Some(0x5e4225),
+        'e' => Some(0xd8581c),
+        'E' => Some(0xffa43c),
+        'k' => Some(0x7a2a10),
+        'a' => Some(0x4a4440),
+        _ => None,
+    };
     let mut px = vec![[0.0; 4]; N * N];
-    for y in 12..N {
-        for x in 0..N {
-            px[y * N + x] = opaque(hex(if (x / 3 + y) % 2 == 0 { 0x5a4024 } else { 0x3a2a16 }));
+    for (row, line) in ART.iter().enumerate() {
+        for (x, ch) in line.chars().enumerate() {
+            if let Some(c) = colour(ch) {
+                px[(N - ART.len() + row) * N + x] = opaque(hex(c));
+            }
         }
     }
     px
