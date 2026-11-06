@@ -12,6 +12,10 @@
 # The interface's hearts are the processor's idle, the food the free memory, the experience bar the
 # disk's work and its level how full the disk is, each the mean of the last minute (`average`, in
 # seconds). `ui = false` hides the interface; `hand = true` shows the viewer's hand, at the lower right.
+# `pig = true` lets a pig loose that keeps to no physics: it walks straight up walls, under the eaves and
+# over the roofs, along the stream's bottom, runs in circles, bounces nearly as high as the houses, flies
+# by, goes up in a puff of smoke and comes down in another (often on a roof) or drops out of the sky,
+# tumbles down the mountains, and eats the crops.
 name = "Blocky"
 
 scene = ["world", "title", "instruments"]
@@ -45,4 +49,5 @@ ruler_end = 0.0
 [element.world]
 type = "blocky"
 hand = false                # the viewer's empty hand at the lower right
+pig = false                 # a pig let loose that defies physics: up walls, over roofs, in puffs of smoke
 ui = true                   # the interface: hotbar, hearts, food and experience

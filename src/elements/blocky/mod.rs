@@ -6,13 +6,14 @@
 //! (`render`) into what is seen and the light on it. Each frame the GPU lights that for the moment
 //! (`sky`): the sky with its sun, moon and stars, the clouds drifting over, the torches flickering at
 //! night. Over everything, the interface (`hud`): its hearts, food and experience follow readings of the
-//! machine.
+//! machine. With `pig = true`, a pig that defies physics runs loose on the farm (`pig`).
 
 mod farm;
 mod herd;
 mod hud;
 mod life;
 mod mobs;
+mod pig;
 mod render;
 mod sky;
 mod textures;
@@ -40,6 +41,7 @@ struct Settings {
     samples: f64,
     distance: f64,
     hand: bool,
+    pig: bool,
     ui: bool,
     gui_scale: f64,
     clouds: f64,
@@ -280,7 +282,11 @@ impl Blocky {
         }
         let yaw = self.s.yaw.to_radians();
         let s = &self.s;
-        let tag = format!("{} {} {} {} {} {} {}", self.seed, s.yaw, s.pitch, s.fov, s.samples, s.distance, s.hand);
+        let mut tag = format!("{} {} {} {} {} {} {}", self.seed, s.yaw, s.pitch, s.fov, s.samples, s.distance, s.hand);
+        // with the pig the cache holds the depths of the whole screen; without it, as it always did
+        if s.pig {
+            tag += " pig";
+        }
         let theme = g.th.dirs.first().map(|d| d.join("theme.toml"));
         // the world made (lit only to be traced) while what the cache keeps is read
         let seed = self.seed;
@@ -299,7 +305,24 @@ impl Blocky {
             w.light_up();
             let tracer = Tracer::new(w, &tex, cam, fog, sky::arcs(&cam), self.s.hand);
             let frame = tracer.render(self.s.samples.round() as usize);
-            let herd = herd::Herd::new(w, fog, &frame, &cam, self.seed, |x, y| tracer.depth(x as f64 + 0.5, y as f64 + 0.5));
+            // with the pig, the herd asks how far off every pixel of the screen is: on every core
+            let all = self.s.pig.then(|| {
+                let mut d = vec![0u8; cam.w * cam.h * 4];
+                crate::trace::rows([&mut d[..]], cam.w * 4, |y, [row]| {
+                    for (x, px) in row.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+                        *px = tracer.depth(x as f64 + 0.5, y as f64 + 0.5).to_le_bytes();
+                    }
+                });
+                d
+            });
+            let depth = |x: i32, y: i32| match &all {
+                Some(d) => {
+                    let i = (y as usize * cam.w + x as usize) * 4;
+                    f32::from_le_bytes([d[i], d[i + 1], d[i + 2], d[i + 3]])
+                }
+                None => tracer.depth(x as f64 + 0.5, y as f64 + 0.5),
+            };
+            let herd = herd::Herd::new(w, fog, &frame, &cam, self.seed, self.s.pig, depth);
             let mut bytes = [frame.base, frame.light, frame.sun].concat();
             bytes.extend(herd.depths().flat_map(f32::to_le_bytes));
             bytes
@@ -345,7 +368,7 @@ impl Blocky {
         }
         let mut depths = chunks.iter().map(|&b| f32::from_le_bytes(b));
         let mut short = false;
-        let herd = herd::Herd::new(w, fog, &frame, cam, self.seed, |_, _| {
+        let herd = herd::Herd::new(w, fog, &frame, cam, self.seed, self.s.pig, |_, _| {
             depths.next().unwrap_or_else(|| {
                 short = true;
                 f32::INFINITY
@@ -559,15 +582,20 @@ impl Part for Blocky {
             }
             3 => {
                 let Some(cam) = self.cam else { return };
-                let (outer, inner) = life::flames(&cam, &self.fires, self.t, &m);
-                gfx.rects(None, &outer, (0.95, 0.45, 0.1), Blend::Alpha);
-                gfx.rects(None, &inner, (1.0, 0.85, 0.35), Blend::Alpha);
+                for (squares, colour) in life::flames(&cam, &self.fires, self.t, &m).iter().zip(life::FLAME) {
+                    gfx.rects(None, squares, colour, Blend::Alpha);
+                }
                 for (puffs, grey) in life::smoke(&cam, &self.smoke, self.t, &m) {
                     gfx.rects(None, &puffs, grey, Blend::Alpha);
                 }
                 let (glow, core) = life::fireflies(&cam, &self.glades, self.t, &m);
                 gfx.rects(None, &glow, (0.8, 1.0, 0.4), Blend::Alpha);
                 gfx.rects(None, &core, (0.92, 1.0, 0.6), Blend::Alpha);
+                if let Some(herd) = &self.herd {
+                    for (puffs, grey) in life::puffs(&cam, &herd.puffs(), &m) {
+                        gfx.rects(None, &puffs, grey, Blend::Alpha);
+                    }
+                }
             }
             _ => {
                 let Some(l) = self.layout else { return };
@@ -688,6 +716,7 @@ fov = 78.0
 samples = 2.0
 distance = 196.0
 hand = false
+pig = false
 ui = true
 gui_scale = 0.0
 clouds = 0.6

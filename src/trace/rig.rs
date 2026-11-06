@@ -45,9 +45,8 @@ struct Part {
 /// A model as it stands, seen from one eye.
 pub struct Pose {
     at: V3,
-    /// Its turn about the upright, cosine and sine, and the world's unit in its own.
-    c: f64,
-    s: f64,
+    /// Its own axes (across, up, forward) in the world, and the world's unit in its own.
+    axes: [V3; 3],
     scale: f64,
     parts: Vec<Part>,
     /// The eye in its frame, and the box about all of its parts there, grown.
@@ -66,6 +65,15 @@ fn turn(v: V3, axis: usize, c: f64, s: f64, k: f64) -> V3 {
     out
 }
 
+/// A direction in the world in a frame of `axes`, and back. Turned only about the upright (an axis
+/// of 0s and a 1), each is what multiplying by the cosine and sine alone makes, to the bit.
+fn into(axes: [V3; 3], v: V3) -> V3 {
+    axes.map(|a| a[0] * v[0] + a[1] * v[1] + a[2] * v[2])
+}
+fn out_of(axes: [V3; 3], v: V3) -> V3 {
+    std::array::from_fn(|i| axes[0][i] * v[0] + axes[1][i] * v[1] + axes[2][i] * v[2])
+}
+
 /// `v` turned about `axis` through `pivot`.
 fn turn_about(v: V3, pivot: V3, axis: usize, c: f64, s: f64, k: f64) -> V3 {
     let r = turn([v[0] - pivot[0], v[1] - pivot[1], v[2] - pivot[2]], axis, c, s, k);
@@ -77,8 +85,13 @@ impl Pose {
     /// each box's hinge, standing at `at` turned by `yaw` about the upright, seen from `eye`.
     pub fn new(boxes: impl IntoIterator<Item = (V3, V3, Option<Hinge>)>, at: V3, yaw: f64, scale: f64, eye: V3) -> Pose {
         let (c, s) = (yaw.cos(), yaw.sin());
-        let e = [eye[0] - at[0], eye[1] - at[1], eye[2] - at[2]];
-        let e = [e[0] * c - e[2] * s, e[1], e[0] * s + e[2] * c].map(|v| v * scale);
+        Pose::oriented(boxes, at, [[c, 0.0, -s], [0.0, 1.0, 0.0], [s, 0.0, c]], scale, eye)
+    }
+
+    /// The same, its own axes (across, up and forward, each a unit and square to the others) the
+    /// world's `axes`: on a wall, upside down, head over heels.
+    pub fn oriented(boxes: impl IntoIterator<Item = (V3, V3, Option<Hinge>)>, at: V3, axes: [V3; 3], scale: f64, eye: V3) -> Pose {
+        let e = into(axes, [eye[0] - at[0], eye[1] - at[1], eye[2] - at[2]]).map(|v| v * scale);
         let (mut lo, mut hi) = ([f64::MAX; 3], [f64::MIN; 3]);
         let parts = boxes
             .into_iter()
@@ -104,15 +117,16 @@ impl Pose {
             })
             .collect();
         let (lo, hi) = grown(lo, hi);
-        Pose { at, c, s, scale, parts, eye: e, lo, hi }
+        Pose { at, axes, scale, parts, eye: e, lo, hi }
     }
 
     /// The corners of a box in its frame (`lo`, `hi`), in the world.
     fn corners(&self, lo: V3, hi: V3) -> [V3; 8] {
-        let (c, s, k) = (self.c, self.s, self.scale);
         std::array::from_fn(|n| {
-            let v = [0, 1, 2].map(|i| if n >> i & 1 == 0 { lo[i] } else { hi[i] } / k);
-            [self.at[0] + v[0] * c + v[2] * s, self.at[1] + v[1], self.at[2] - v[0] * s + v[2] * c]
+            let v = [0, 1, 2].map(|i| if n >> i & 1 == 0 { lo[i] } else { hi[i] } / self.scale);
+            // added to where it stands term by term, as turned about the upright it was, to the bit
+            let a = &self.axes;
+            std::array::from_fn(|i| self.at[i] + a[0][i] * v[0] + a[1][i] * v[1] + a[2][i] * v[2])
         })
     }
 
@@ -122,6 +136,12 @@ impl Pose {
             (Some(r), true) => Some(centres(r)),
             _ => None,
         }
+    }
+
+    /// Whether a point of the world is within the box about all of its parts.
+    pub fn contains(&self, p: V3) -> bool {
+        let l = into(self.axes, [p[0] - self.at[0], p[1] - self.at[1], p[2] - self.at[2]]).map(|v| v * self.scale);
+        (0..3).all(|i| self.lo[i] <= l[i] && l[i] <= self.hi[i])
     }
 
     /// The pixels it can be seen in, all of it in front of the eye; None otherwise.
@@ -194,8 +214,7 @@ impl Pose {
 
     /// As `hit`, of the parts in `parts` (a bit each); the others the ray is known to miss.
     fn hit_among(&self, d: V3, parts: u64) -> Option<RigHit> {
-        let (c, s) = (self.c, self.s);
-        let ld = [d[0] * c - d[2] * s, d[1], d[0] * s + d[2] * c].map(|v| v * self.scale);
+        let ld = into(self.axes, d).map(|v| v * self.scale);
         let ray = Ray::new(self.eye, ld);
         // from `trace`, the parts' rectangles have already left out what misses the whole
         if parts == u64::MAX {
@@ -222,7 +241,7 @@ impl Pose {
         n[axis] = sign;
         // the normal turned out of its hinge, then out into the world
         let n = p.turn.map_or(n, |(axis, c, s)| turn(n, axis, c, s, -1.0));
-        let normal = [n[0] * c + n[2] * s, n[1], -n[0] * s + n[2] * c];
+        let normal = out_of(self.axes, n);
         Some(RigHit { t, part: pi, axis, sign, local, normal })
     }
 }
@@ -288,6 +307,47 @@ mod tests {
             }
         }
         assert!(met > 5000, "many rays meet the model: {met}");
+    }
+
+    #[test]
+    fn a_pose_turned_any_way_meets_what_the_upright_one_does_in_its_frame() {
+        let mut rng = Rng::new(11);
+        for _ in 0..200 {
+            let boxes = model(&mut rng);
+            let at = [rng.range(-20.0, 20.0), rng.range(-2.0, 2.0), rng.range(10.0, 40.0)];
+            // turned upright, the same to the bit as turned by a yaw
+            let yaw = rng.range(-3.0, 3.0);
+            let (c, s) = (yaw.cos(), yaw.sin());
+            let eye = [0.0, 4.0, 0.0];
+            let (a, b) = (
+                Pose::new(boxes.iter().copied(), at, yaw, 16.0, eye),
+                Pose::oriented(boxes.iter().copied(), at, [[c, 0.0, -s], [0.0, 1.0, 0.0], [s, 0.0, c]], 16.0, eye),
+            );
+            // any way: its axes a random turn
+            let up = norm([rng.range(-1.0, 1.0), rng.range(-1.0, 1.0), rng.range(-1.0, 1.0)]);
+            let f = norm(crate::trace::cross(up, norm([rng.range(-1.0, 1.0), rng.range(-1.0, 1.0), rng.range(-1.0, 1.0)])));
+            let axes = [crate::trace::cross(up, f), up, f];
+            let turned = Pose::oriented(boxes.iter().copied(), at, axes, 16.0, eye);
+            let local = |v: V3| into(axes, v);
+            let upright = Pose::new(boxes.iter().copied(), [0.0; 3], 0.0, 16.0, local([eye[0] - at[0], eye[1] - at[1], eye[2] - at[2]]));
+            for _ in 0..100 {
+                let aim = [at[0] + rng.range(-1.0, 1.0), at[1] + rng.range(-1.0, 1.0), at[2] + rng.range(-1.0, 1.0)];
+                let d = norm([aim[0] - eye[0], aim[1] - eye[1], aim[2] - eye[2]]);
+                let (ha, hb) = (a.hit(d), b.hit(d));
+                assert_eq!(
+                    ha.as_ref().map(|h| (h.part, h.t.to_bits(), h.normal.map(f64::to_bits))),
+                    hb.as_ref().map(|h| (h.part, h.t.to_bits(), h.normal.map(f64::to_bits)))
+                );
+                let (ht, hu) = (turned.hit(d), upright.hit(local(d)));
+                assert_eq!(ht.as_ref().map(|h| h.part), hu.as_ref().map(|h| h.part));
+                if let (Some(ht), Some(hu)) = (ht, hu) {
+                    assert!((ht.t - hu.t).abs() < 1e-9);
+                    let n = local(ht.normal);
+                    assert!((0..3).all(|i| (n[i] - hu.normal[i]).abs() < 1e-9), "its normal turned with it");
+                }
+            }
+            assert_eq!(a.pixels(&Camera::new(eye, 0.0, 0.0, 60.0, 320, 180)), b.pixels(&Camera::new(eye, 0.0, 0.0, 60.0, 320, 180)));
+        }
     }
 
     #[test]

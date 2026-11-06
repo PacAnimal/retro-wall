@@ -237,20 +237,11 @@ pub fn paint_hotbar(c: &Context, l: &Layout) {
         fill(0.37, 0.95, sx + s, y + 20.0 * s, 19.0 * s, s);
         fill(0.37, 0.95, sx + 19.0 * s, y + 2.0 * s, s, 19.0 * s);
     }
-    // the tools, all diamond, the rest of the slots empty
+    // the tools, all diamond, the rest of the slots empty; none of them selected
     for (k, rows) in [SWORD, SHOVEL, PICKAXE, AXE, HOE].into_iter().enumerate() {
         let (ix, iy) = (x + (3.0 + 20.0 * k as f64) * s, y + 3.0 * s);
         item(c, Art { rows, palette: DIAMOND }, 0x082220, ix, iy, s);
     }
-    // the selected slot: the sword's, framed white
-    let sel = 0.0;
-    let (fx, fy) = (x + (sel * 20.0 - 1.0) * s, y - s);
-    c.set_source_rgba(0.0, 0.0, 0.0, 0.9);
-    frame(c, fx, fy, 24.0 * s, 24.0 * s, s);
-    c.set_source_rgb(1.0, 1.0, 1.0);
-    frame(c, fx + s, fy + s, 22.0 * s, 22.0 * s, s);
-    c.set_source_rgb(0.75, 0.75, 0.75);
-    frame(c, fx + 2.0 * s, fy + 2.0 * s, 20.0 * s, 20.0 * s, s);
 }
 
 /// An item: its picture over an outline in `edge`, one pixel round its filled pixels on their open
@@ -267,15 +258,6 @@ fn item(c: &Context, art: Art, edge: u32, x: f64, y: f64, s: f64) {
     }
     let _ = c.fill();
     art.paint(c, x, y, s);
-}
-
-/// A frame `t` thick inside the rectangle.
-fn frame(c: &Context, x: f64, y: f64, w: f64, h: f64, t: f64) {
-    c.rectangle(x, y, w, t);
-    c.rectangle(x, y + h - t, w, t);
-    c.rectangle(x, y, t, h);
-    c.rectangle(x + w - t, y, t, h);
-    let _ = c.fill();
 }
 
 /// The status rows, into a picture of their own the size of `Layout::status`, at its top left.

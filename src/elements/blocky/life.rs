@@ -42,6 +42,35 @@ fn night(m: &Moment) -> f64 {
     ((1.0 - m.day) * 1.4 - 0.2).clamp(0.0, 1.0)
 }
 
+/// The pig's puffs of smoke (each where it went up and how long ago, `pig::PUFF` at most): a burst of
+/// square puffs flung out every way, slowing, growing and thinning as they go; in two greys, light by
+/// day and by night. The puffs in each grey, and each's colour.
+pub fn puffs(cam: &Camera, from: &[(V3, f64)], m: &Moment) -> [(Vec<Square>, (f64, f64, f64)); 2] {
+    let (mut dark, mut light) = (vec![], vec![]);
+    let k = 0.55 + 0.45 * m.day;
+    for &(at, age) in from {
+        // each its own, by where it is, however many are in the air
+        let id = (at[0].to_bits() ^ at[1].to_bits().rotate_left(21) ^ at[2].to_bits().rotate_left(42)) as usize;
+        let life = age / super::pig::PUFF;
+        let out = 1.0 - (1.0 - life).powi(3);
+        for p in 0..18 {
+            let n = id.wrapping_add(p * 131);
+            let (a, b) = (hash(n, 11) * std::f64::consts::TAU, hash(n, 12) * 2.0 - 1.0);
+            let across = (1.0 - b * b).sqrt();
+            let dir = [across * a.cos(), b * 0.7 + 0.3, across * a.sin()];
+            let reach = 0.6 + hash(n, 13) * 0.9;
+            let q = add(at, mul(dir, reach * out));
+            let q = add(q, [0.0, life * 0.6, 0.0]);
+            let size = 0.25 + hash(n, 14) * 0.25 + life * 0.35;
+            let alpha = 0.95 * (1.0 - life).powf(1.5);
+            if let Some(s) = square(cam, q, size, alpha) {
+                if hash(n, 15) < 0.45 { dark.push(s) } else { light.push(s) }
+            }
+        }
+    }
+    [(dark, (0.72 * k, 0.72 * k, 0.75 * k)), (light, (0.95 * k, 0.95 * k, 0.97 * k))]
+}
+
 /// Smoke from each of `from` (a chimney only while it is lit, a fire only at night): square puffs rising, drifting downwind,
 /// growing and thinning as they go, each on a way of its own; a puff already let out goes on when its
 /// chimney is put out. In two greys, a puff one or the other, a chimney's mostly the darker, a fire's
@@ -105,30 +134,74 @@ pub fn fireflies(cam: &Camera, glades: &[(V3, f64)], t: f64, m: &Moment) -> (Vec
     (glow, core)
 }
 
-/// The flames of each fire of `fires` (those seen from the camera), lit at night only: square licks
-/// rising from its logs and flickering, the outer orange and the inner yellow. A fire burns from dusk
+/// Smooth noise over the plane, 0 to 1: a value at each whole point, eased between them.
+fn noise(x: f64, y: f64, salt: u64) -> f64 {
+    let (xi, yi) = (x.floor(), y.floor());
+    let (fx, fy) = (x - xi, y - yi);
+    let (sx, sy) = (fx * fx * (3.0 - 2.0 * fx), fy * fy * (3.0 - 2.0 * fy));
+    let at = |dx: f64, dy: f64| {
+        let (a, b) = ((xi + dx) as i64, (yi + dy) as i64);
+        hash((a.wrapping_mul(0x9e37_79b9) ^ b.wrapping_mul(0x85eb_ca6b)) as usize, salt)
+    };
+    let top = at(0.0, 0.0) + (at(1.0, 0.0) - at(0.0, 0.0)) * sx;
+    let bottom = at(0.0, 1.0) + (at(1.0, 1.0) - at(0.0, 1.0)) * sx;
+    top + (bottom - top) * sy
+}
+
+/// A campfire's flames, in sixteenths of a block: how many across each of its two pictures and how many
+/// up, and how high over the cell's floor they start (on the logs, among the embers).
+const FLAME_W: usize = 10;
+const FLAME_H: usize = 12;
+const FLAME_FOOT: f64 = 0.22;
+/// The flames' colours, from their tips to their hearts: deep red, orange, yellow, nearly white.
+pub const FLAME: [(f64, f64, f64); 4] = [(0.78, 0.2, 0.05), (0.98, 0.46, 0.08), (1.0, 0.76, 0.18), (1.0, 0.94, 0.6)];
+
+/// How hot a campfire's flame is at a pixel of one of its pictures (`u` across, `v` up, in sixteenths)
+/// at `t`: hottest low in the middle, cooling up and out, and torn into tongues by noise that rises
+/// through it, so the tongues lick upwards and change a little at a time, never jumping.
+pub fn flame_heat(u: usize, v: usize, t: f64, salt: u64) -> f64 {
+    let x = (u as f64 + 0.5) / FLAME_W as f64 * 2.0 - 1.0;
+    let h = (v as f64 + 0.5) / FLAME_H as f64;
+    let body = (1.0 - x.abs().powf(1.6)).max(0.0) * (1.0 - h).max(0.0).powf(0.7);
+    let rise = v as f64 - t * 7.0;
+    let tongues = 0.65 * noise(u as f64 * 0.45, rise * 0.3, salt) + 0.35 * noise(u as f64 * 0.9, rise * 0.6, salt ^ 0x55);
+    body * 1.35 - tongues * 1.05 * (0.2 + h)
+}
+
+/// The flames of each fire of `fires` (those seen from the camera, each the middle of its cell's floor),
+/// lit at night only: two pictures of flame crossed in its cell as its logs are, standing on them, a
+/// square for each of their pixels: in each of `FLAME`'s colours, coolest first. A fire burns from dusk
 /// to dawn; by day its logs lie cold.
-pub fn flames(cam: &Camera, fires: &[V3], t: f64, m: &Moment) -> (Vec<Square>, Vec<Square>) {
-    const LICKS: usize = 10;
+pub fn flames(cam: &Camera, fires: &[V3], t: f64, m: &Moment) -> [Vec<Square>; 4] {
+    let mut out: [Vec<Square>; 4] = Default::default();
     let lit = night(m);
-    let (mut outer, mut inner) = (vec![], vec![]);
     if lit <= 0.0 {
-        return (outer, inner);
+        return out;
     }
+    const SIXTEENTH: f64 = 1.0 / 16.0;
     for (f, &base) in fires.iter().enumerate() {
-        for k in 0..LICKS {
-            // each lick its own spot over the logs, jumping to another about ten times a second
-            let id = f * 97 + k * 13 + (t * 10.0 + hash(f * 31 + k, 20)).floor() as usize;
-            let (jx, jz, up) = (hash(id, 21) - 0.5, hash(id, 22) - 0.5, hash(id, 23));
-            let p = add(base, [0.5 * jx, 0.1 + 0.5 * up, 0.5 * jz]);
-            let size = 0.3 * (1.0 - 0.6 * up);
-            outer.extend(square(cam, p, size, lit));
-            if up < 0.5 {
-                inner.extend(square(cam, add(p, [0.0, -0.02, 0.0]), size * 0.55, lit));
+        for (k, across) in {
+            use std::f64::consts::FRAC_1_SQRT_2 as D;
+            [[D, 0.0, D], [D, 0.0, -D]]
+        }
+        .into_iter()
+        .enumerate()
+        {
+            let salt = 40 + (f * 2 + k) as u64;
+            for v in 0..FLAME_H {
+                for u in 0..FLAME_W {
+                    let heat = flame_heat(u, v, t, salt);
+                    let Some(c) = [0.14, 0.34, 0.62, 0.92].iter().rposition(|&edge| heat > edge) else { continue };
+                    let along = (u as f64 + 0.5 - FLAME_W as f64 / 2.0) * SIXTEENTH;
+                    let p = add(base, add(mul(across, along), [0.0, FLAME_FOOT + (v as f64 + 0.5) * SIXTEENTH, 0.0]));
+                    // a hair over a pixel of the picture, so its squares close up; while they fade in
+                    // at dusk, exactly a pixel, so no overlap shows twice as bright
+                    out[c].extend(square(cam, p, SIXTEENTH * if lit < 1.0 { 1.0 } else { 1.15 }, lit));
+                }
             }
         }
     }
-    (outer, inner)
+    out
 }
 
 /// Now and then, rarely, a bird crossing the sky high over the land, or a few in a V, flapping; by day

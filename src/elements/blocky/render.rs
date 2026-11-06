@@ -419,6 +419,17 @@ impl<'a> Tracer<'a> {
             if !self.tex.all[face].solid(u, v) {
                 continue;
             }
+            // a campfire's logs lie still, and its embers glow as a torch's flame does (`face`)
+            if face == super::textures::CAMPFIRE {
+                let full = self.tex.all[face].at(u, v, 0);
+                let hot = full[0] > 0.75 && full[0] > full[2] + 0.25;
+                let c = if hot { full } else { self.texel(face, u, v, t, 0.7) };
+                let k = if hot { 1.0 } else { 0.85 };
+                return Some((
+                    Lit { m: if hot { GLOW } else { STILL }, ..Lit::of(self.world, cell[0], cell[1], cell[2], [c[0] * k, c[1] * k, c[2] * k], PLANT) },
+                    t,
+                ));
+            }
             let c = self.texel(face, u, v, t, 0.7);
             // lit a little less the lower it is: the ground's shade among the stems
             let k = 0.78 + 0.22 * (1.0 - v);

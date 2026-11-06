@@ -11,7 +11,8 @@
 //! keep their colour as they walk in and out of shadows.
 
 use super::mobs::{self, Kind};
-use super::render::{self, Camera, Frame, SIDE, mob_shade};
+use super::pig::Pig;
+use super::render::{self, Camera, Frame, SIDE, V3, mob_shade};
 use super::world::*;
 use crate::rng::Rng;
 use crate::trace::camera::{Px, bounds, overlap, pixels};
@@ -21,6 +22,29 @@ use std::collections::HashMap;
 
 /// A step of the animals, in seconds.
 const STEP: f64 = 0.1;
+
+/// How far off a pixel of a patch is, for an animal posed as `pose`: the picture's depth, but where it
+/// shows a plant (grass, a flower, a crop) at a point within the animal's box, nothing. The animal
+/// stands in it and treads it down, as a mob that stands still treads down its own; a plant before it,
+/// outside its box, still hides it.
+fn scene(p: &Backdrop, x: i32, y: i32, pose: &Pose, cam: &Camera) -> f32 {
+    let i = p.index(x, y);
+    let d = p.depth[i];
+    if d.is_finite() && (p.planes[2][i * 4 + 2] as f64 / 40.0).round() as u8 == render::STEM {
+        let at = render::add(cam.eye, render::mul(cam.ray(x as f64 + 0.5, y as f64 + 0.5), d as f64));
+        if pose.contains(at) {
+            return f32::INFINITY;
+        }
+    }
+    d
+}
+
+/// Whether everything in `px` that a patch holds is nearer than `near` for an animal posed as `pose`
+/// (`scene`): it is hidden behind it there.
+fn hides(p: &Backdrop, px: Px, near: f32, pose: &Pose, cam: &Camera) -> bool {
+    let Some(r) = overlap(px, p.at) else { return true };
+    (r.1..r.3).all(|y| (r.0..r.2).all(|x| p.depth[p.index(x, y)] <= near && scene(p, x, y, pose, cam) <= near))
+}
 
 /// Where an animal may stand: a grid of cells, open or not, and the height its feet are at.
 struct Ground {
@@ -75,6 +99,8 @@ pub struct Herd {
     kept: Kept,
     /// The time stepped to.
     t: f64,
+    /// The pig that keeps to nothing, when it is let loose (`pig`).
+    pig: Option<Pig>,
 }
 
 /// Each animal's pixels in each patch (by their places in the herd), as last traced whole there, and the
@@ -105,8 +131,9 @@ fn swims(kind: Kind) -> bool {
 impl Herd {
     /// The animals that wander in the world, the patches they are seen in kept from the baked picture.
     /// `depth` is how far off a pixel of the screen is (`Tracer::depth`), asked for the patches' pixels
-    /// in turn, row by row (`depths` gives them back in that order); `fog` is the tracer's.
-    pub fn new(w: &World, fog: (f64, f64), frame: &Frame, cam: &Camera, seed: i64, mut depth: impl FnMut(i32, i32) -> f32) -> Herd {
+    /// in turn, row by row (`depths` gives them back in that order); `fog` is the tracer's. With `pig`,
+    /// the pig too, which goes anywhere: the patch is then the whole screen.
+    pub fn new(w: &World, fog: (f64, f64), frame: &Frame, cam: &Camera, seed: i64, pig: bool, mut depth: impl FnMut(i32, i32) -> f32) -> Herd {
         let mut grounds: Vec<(Ground, [i32; 4], bool)> = vec![];
         let mut animals = vec![];
         for (i, (kind, at, yaw)) in w.mobs.roaming().into_iter().enumerate() {
@@ -152,10 +179,27 @@ impl Herd {
             })
             .filter(|r| r.2 > r.0 && r.3 > r.1)
             .collect();
+        if pig {
+            rects.push((0, 0, cam.w as i32, cam.h as i32));
+        }
         merge(&mut rects);
-        let patches = rects.into_iter().map(|r| Backdrop::take(r, cam.w, &[&frame.base, &frame.light, &frame.sun], &mut depth)).collect();
-        let shown = Changes::new(animals.len());
-        Herd { animals, grounds: grounds.into_iter().map(|(g, _, _)| g).collect(), patches, fog, shown, kept: Default::default(), t: 0.0 }
+        let patches: Vec<Backdrop> = rects.into_iter().map(|r| Backdrop::take(r, cam.w, &[&frame.base, &frame.light, &frame.sun], &mut depth)).collect();
+        // the pig is put down only where it is seen: on the screen, nothing nearer before it
+        let pig = pig.then(|| {
+            Pig::new(w, cam, seed, |p| {
+                let Some((x, y, _)) = cam.project(p) else { return false };
+                let (px, py) = (x.floor() as i32, y.floor() as i32);
+                let far = ((p[0] - cam.eye[0]).powi(2) + (p[1] - cam.eye[1]).powi(2) + (p[2] - cam.eye[2]).powi(2)).sqrt() as f32;
+                let margin = (cam.w.min(cam.h) / 30) as i32;
+                px >= margin
+                    && py >= margin
+                    && px < cam.w as i32 - margin
+                    && py < cam.h as i32 - margin
+                    && patches.iter().any(|b| b.at.0 <= px && px < b.at.2 && b.at.1 <= py && py < b.at.3 && b.depth[b.index(px, py)] >= far - 0.75)
+            })
+        });
+        let shown = Changes::new(animals.len() + pig.is_some() as usize);
+        Herd { animals, grounds: grounds.into_iter().map(|(g, _, _)| g).collect(), patches, fog, shown, kept: Default::default(), t: 0.0, pig }
     }
 
     /// How far off each of the patches' pixels is, in the order `new` asks for them.
@@ -169,8 +213,26 @@ impl Herd {
             self.step();
             self.t += STEP;
         }
+        if let Some(pig) = &mut self.pig {
+            pig.advance(t);
+        }
         // of everything each one's picture depends on, exactly, so no move goes unpainted
-        self.animals.iter().flat_map(pose_key).fold(0xcbf2_9ce4_8422_2325u64, |h, v| (h ^ v).wrapping_mul(0x0100_0000_01b3))
+        self.animals
+            .iter()
+            .map(pose_key)
+            .chain(self.pig.as_ref().map(Pig::key))
+            .flatten()
+            .fold(0xcbf2_9ce4_8422_2325u64, |h, v| (h ^ v).wrapping_mul(0x0100_0000_01b3))
+    }
+
+    /// Each moving thing's key (`pose_key`): the animals', then the pig's.
+    fn keys(&self) -> Vec<[u64; 5]> {
+        self.animals.iter().map(pose_key).chain(self.pig.as_ref().map(Pig::key)).collect()
+    }
+
+    /// The pig's puffs of smoke in the air: where each went up, and how long ago, in seconds.
+    pub fn puffs(&self) -> Vec<(V3, f64)> {
+        self.pig.as_ref().map_or(vec![], |p| p.puffs().collect())
     }
 
     fn step(&mut self) {
@@ -243,16 +305,22 @@ impl Herd {
     /// every animal over them. A pixel's colour is the baked one and the animals over it, so a region
     /// painted again is what painting the whole patch would make there.
     pub fn paint(&mut self, cam: &Camera) -> Vec<(i32, i32, i32, i32, [Vec<u8>; 3])> {
-        let seen: Vec<Option<Seen>> = self.animals.iter().map(|a| Seen::new(a, cam)).collect();
+        let seen: Vec<Option<Seen>> = self
+            .animals
+            .iter()
+            .map(|a| Seen::new(a, cam))
+            .chain(self.pig.as_ref().map(|p| p.seen(cam).map(|(rect, pixels, pose)| Seen { rect, pixels, pose, kind: Kind::Pig, wild: true })))
+            .collect();
+        let keys = self.keys();
         // an animal hidden where it is (behind a house) changes nothing it moves
         let patches = &self.patches;
-        let visible = |s: &Seen| !patches.iter().all(|p| p.hides(s.pixels, s.pose.near() as f32));
-        let dirty = self.shown.since(self.animals.iter().zip(&seen).map(|(a, s)| (pose_key(a), s.as_ref().filter(|s| visible(s)).map(|s| s.pixels))));
+        let visible = |s: &Seen| !patches.iter().all(|p| hides(p, s.pixels, s.pose.near() as f32, &s.pose, cam));
+        let dirty = self.shown.since(keys.iter().zip(&seen).map(|(&k, s)| (k, s.as_ref().filter(|s| visible(s)).map(|s| s.pixels))));
         let mut out = vec![];
         let mut kept = std::mem::take(&mut self.kept);
         for (pi, p) in self.patches.iter().enumerate() {
             for clip in dirty.iter().filter_map(|&d| overlap(d, p.at)) {
-                out.push((clip.0, clip.1, clip.2 - clip.0, clip.3 - clip.1, self.paint_region(pi, p, clip, &seen, cam, &mut kept)));
+                out.push((clip.0, clip.1, clip.2 - clip.0, clip.3 - clip.1, self.paint_region(pi, p, clip, &seen, &keys, cam, &mut kept)));
             }
         }
         self.kept = kept;
@@ -261,25 +329,27 @@ impl Herd {
 
     /// The region `clip` of a patch, baked, with the animals traced into it.
     /// `kept`: each animal's pixels in each patch as last traced whole there, by its pose.
-    fn paint_region(&self, pi: usize, p: &Backdrop, clip: Px, seen: &[Option<Seen>], cam: &Camera, kept: &mut Kept) -> [Vec<u8>; 3] {
+    fn paint_region(&self, pi: usize, p: &Backdrop, clip: Px, seen: &[Option<Seen>], keys: &[[u64; 5]], cam: &Camera, kept: &mut Kept) -> [Vec<u8>; 3] {
         let rw = (clip.2 - clip.0) as usize;
-        let (planes, mut near) = p.crop(clip);
+        let (planes, baked) = p.crop(clip);
+        // the nearest animal painted in each pixel so far
+        let mut near = vec![f32::INFINITY; baked.len()];
         let [mut base, mut light, mut sun]: [Vec<u8>; 3] = planes.try_into().unwrap_or_default();
-        for (ai, (a, s)) in self.animals.iter().zip(seen).enumerate() {
-            let Some(Seen { rect, pixels, pose }) = s else { continue };
+        for (ai, (&key, s)) in keys.iter().zip(seen).enumerate() {
+            let Some(s) = s else { continue };
+            let Seen { rect, pixels, .. } = s;
             // an animal is traced into a patch its reach's rectangle is on
             if rect.2 < p.at.0 as f64 || rect.3 < p.at.1 as f64 || rect.0 > p.at.2 as f64 || rect.1 > p.at.3 as f64 {
                 continue;
             }
             let Some(area) = overlap(*pixels, clip) else { continue };
-            let key = pose_key(a);
             // its pixels as traced in this pose before, if they were all traced; else traced now, and
             // kept where this region holds all of it in this patch
             let frags: Vec<Frag> = match kept.get(&(ai, pi)) {
                 Some((k, frags)) if *k == key => frags.iter().filter(|f| f.x >= area.0 && f.x < area.2 && f.y >= area.1 && f.y < area.3).copied().collect(),
                 _ => {
                     let whole = overlap(*pixels, p.at) == Some(area);
-                    let frags = self.trace_frags(a, pose, p, area, cam);
+                    let frags = self.trace_frags(s, p, area, cam);
                     if whole {
                         kept.insert((ai, pi), (key, frags.clone()));
                     }
@@ -288,7 +358,9 @@ impl Herd {
             };
             for f in frags {
                 let k = (f.y - clip.1) as usize * rw + (f.x - clip.0) as usize;
-                if f.t >= near[k] {
+                // before every other animal there, and before what is there or treading down a plant
+                // there (`scene`): the same in whatever order the animals are painted
+                if f.t >= near[k] || (f.t >= baked[k] && f.t >= scene(p, f.x, f.y, &s.pose, cam)) {
                     continue;
                 }
                 near[k] = f.t;
@@ -304,7 +376,9 @@ impl Herd {
     }
 
     /// An animal traced over `area` of a patch: each pixel it is seen in, with what it paints there.
-    fn trace_frags(&self, a: &Animal, pose: &Pose, p: &Backdrop, area: Px, cam: &Camera) -> Vec<Frag> {
+    fn trace_frags(&self, s: &Seen, p: &Backdrop, area: Px, cam: &Camera) -> Vec<Frag> {
+        let (kind, pose) = (s.kind, &s.pose);
+        let near = pose.near() as f32;
         let baked = &p.planes[0];
         let mut out = vec![];
         // each face's shade, facing and material: the same wherever a ray meets it in this pose
@@ -312,11 +386,15 @@ impl Herd {
         pose.trace(
             cam,
             area,
-            |x, y| p.depth[p.index(x, y)],
+            |x, y| {
+                // a plant matters only where the picture is nearer than all of the animal
+                let d = p.depth[p.index(x, y)];
+                if d > near { d } else { scene(p, x, y, pose, cam) }
+            },
             |sx, sy, d, h| {
                 // a duck shows only above the water, a fish through it
                 let hy = cam.eye[1] + d[1] * h.t;
-                if matches!(a.kind, Kind::Duck | Kind::Duckling) && hy < SURFACE {
+                if matches!(kind, Kind::Duck | Kind::Duckling) && !s.wild && hy < SURFACE {
                     return;
                 }
                 let f = h.part * 6 + h.axis * 2 + (h.sign > 0.0) as usize;
@@ -330,14 +408,20 @@ impl Herd {
                     let (g, mat) = if h.normal[1].abs() < 0.5 { (super::sky::side_angle(h.normal), SIDE * 40) } else { (facing * 32, 0) };
                     (shade, g, mat)
                 });
-                let c = mobs::coat(a.kind, &h).map(|v| (v * shade).clamp(0.0, 1.0));
+                let c = mobs::coat(kind, &h).map(|v| (v * shade).clamp(0.0, 1.0));
                 let byte = |v: f32| (v * 255.0 + 0.5) as u8;
                 let t = h.t as f32;
-                if a.kind == Kind::Fish {
+                // a fish, and the pig walking the bottom of the stream, through the water
+                let under = match kind {
+                    Kind::Fish => Some(0.55),
+                    _ if s.wild && self.pig.as_ref().is_some_and(|pig| pig.wet([cam.eye[0] + d[0] * h.t, hy, cam.eye[2] + d[2] * h.t])) => Some(0.45),
+                    _ => None,
+                };
+                if let Some(k) = under {
                     let b = p.index(sx, sy) * 4;
                     let w = [baked[b + 2], baked[b + 1], baked[b]].map(|v| v as f32 / 255.0);
                     let tint = [c[0] * 0.75, c[1] * 0.88, c[2]];
-                    let mixed: [f32; 3] = std::array::from_fn(|j| tint[j] + (w[j] - tint[j]) * 0.55);
+                    let mixed: [f32; 3] = std::array::from_fn(|j| tint[j] + (w[j] - tint[j]) * k);
                     out.push(Frag { x: sx, y: sy, t, base: [byte(mixed[2]), byte(mixed[1]), byte(mixed[0]), 255], lit: None });
                     return;
                 }
@@ -373,6 +457,9 @@ struct Seen {
     rect: (f64, f64, f64, f64),
     pixels: Px,
     pose: Pose,
+    kind: Kind,
+    /// The pig, which goes anywhere.
+    wild: bool,
 }
 
 impl Seen {
@@ -386,7 +473,7 @@ impl Seen {
         let pose = mobs::pose(a.kind, feet, a.yaw, a.walk, cam.eye);
         let all = pixels(rect);
         let pixels = pose.pixels(cam).and_then(|p| overlap(p, all)).unwrap_or(all);
-        Some(Seen { rect, pixels, pose })
+        Some(Seen { rect, pixels, pose, kind: a.kind, wild: false })
     }
 }
 
@@ -450,7 +537,7 @@ mod tests {
         let cam = Camera::new(w.eye, 35f64.to_radians(), -13f64.to_radians(), 78.0, 96, 54);
         let tracer = Tracer::new(&w, &tex, cam, (130.0, 190.0), super::super::sky::arcs(&cam), false);
         let frame = tracer.render(1);
-        let mut herd = Herd::new(&w, tracer.fog, &frame, &cam, 7, |x, y| tracer.depth(x as f64 + 0.5, y as f64 + 0.5));
+        let mut herd = Herd::new(&w, tracer.fog, &frame, &cam, 7, false, |x, y| tracer.depth(x as f64 + 0.5, y as f64 + 0.5));
         assert!(herd.animals.len() > 20);
         let start: Vec<[f64; 2]> = herd.animals.iter().map(|a| a.at).collect();
         let n = herd.animals.len();
@@ -477,7 +564,70 @@ mod tests {
     }
 
     #[test]
+    fn grass_an_animal_walks_through_does_not_stick_through_it() {
+        let ahead = (35f64.to_radians().sin(), 35f64.to_radians().cos());
+        let w = World::new(7, ahead);
+        let tex = super::super::textures::Textures::new(7);
+        let cam = Camera::new(w.eye, 35f64.to_radians(), -13f64.to_radians(), 78.0, 480, 270);
+        let tracer = Tracer::new(&w, &tex, cam, (130.0, 190.0), super::super::sky::arcs(&cam), false);
+        let bare = tracer.render(1);
+        let mut herd = Herd::new(&w, tracer.fog, &bare, &cam, 7, false, |x, y| tracer.depth(x as f64 + 0.5, y as f64 + 0.5));
+        let (mut trodden, mut hidden) = (0, 0);
+        for k in 1..=400 {
+            herd.advance(k as f64 * STEP);
+            let mut frame = Frame { base: bare.base.clone(), light: bare.light.clone(), sun: bare.sun.clone() };
+            herd.shown = Changes::new(herd.keys().len());
+            herd.paint_into(&cam, &mut frame, cam.w);
+            if k % 8 != 0 {
+                continue;
+            }
+            // every pixel each walking animal is met in, ray by ray, by none other
+            let p = &herd.patches[0];
+            let mut met: HashMap<(i32, i32), Vec<(f64, usize)>> = HashMap::new();
+            let seen: Vec<Option<Seen>> = herd.animals.iter().map(|a| Seen::new(a, &cam)).collect();
+            for (ai, s) in seen.iter().enumerate() {
+                let Some(s) = s.as_ref().filter(|s| !swims(s.kind)) else { continue };
+                let Some(area) = overlap(s.pixels, p.at) else { continue };
+                for y in area.1..area.3 {
+                    for x in area.0..area.2 {
+                        if let Some(h) = s.pose.hit(cam.ray(x as f64 + 0.5, y as f64 + 0.5)) {
+                            met.entry((x, y)).or_default().push((h.t, ai));
+                        }
+                    }
+                }
+            }
+            for (&(x, y), hits) in &met {
+                let [(t, ai)] = hits[..] else { continue };
+                let pose = &seen[ai].as_ref().unwrap().pose;
+                let (i, d) = ((y as usize * cam.w + x as usize) * 4, p.depth[p.index(x, y)] as f64);
+                if d >= t {
+                    continue;
+                }
+                if scene(p, x, y, pose, &cam).is_infinite() {
+                    // a plant within it, before it: it shows over the plant
+                    trodden += 1;
+                    assert_ne!(frame.base[i..i + 4], bare.base[i..i + 4], "grass through an animal at {x}, {y}, step {k}");
+                } else {
+                    // anything else before it, a plant outside it among them, hides it
+                    hidden += 1;
+                    assert_eq!(frame.base[i..i + 4], bare.base[i..i + 4], "seen through what is before it at {x}, {y}, step {k}");
+                }
+            }
+        }
+        assert!(trodden > 50, "animals walk through plants: {trodden}");
+        assert!(hidden > 50, "and behind things: {hidden}");
+    }
+
+    #[test]
     fn painting_what_changed_makes_what_painting_everything_does() {
+        for pig in [false, true] {
+            painted_alike(pig);
+        }
+    }
+
+    /// Painting only what changed, each step, makes what painting everything does, with the pig or
+    /// without.
+    fn painted_alike(pig: bool) {
         let ahead = (35f64.to_radians().sin(), 35f64.to_radians().cos());
         let w = World::new(7, ahead);
         let tex = super::super::textures::Textures::new(7);
@@ -485,7 +635,7 @@ mod tests {
         let tracer = Tracer::new(&w, &tex, cam, (130.0, 190.0), super::super::sky::arcs(&cam), false);
         let bare = tracer.render(1);
         let depth = |x: i32, y: i32| tracer.depth(x as f64 + 0.5, y as f64 + 0.5);
-        let (mut herd, mut fresh) = (Herd::new(&w, tracer.fog, &bare, &cam, 7, depth), Herd::new(&w, tracer.fog, &bare, &cam, 7, depth));
+        let (mut herd, mut fresh) = (Herd::new(&w, tracer.fog, &bare, &cam, 7, pig, depth), Herd::new(&w, tracer.fog, &bare, &cam, 7, pig, depth));
         let lay = |into: &mut Frame, h: &mut Herd| {
             for (x, y, pw, ph, pics) in h.paint(&cam) {
                 for (pic, to) in pics.iter().zip([&mut into.base, &mut into.light, &mut into.sun]) {
@@ -499,17 +649,26 @@ mod tests {
         let copy = |f: &Frame| Frame { base: f.base.clone(), light: f.light.clone(), sun: f.sun.clone() };
         let mut kept = copy(&bare);
         let mut changed = 0;
+        // with the pig, the same herd without it beside, to see that it shows
+        let mut without = Herd::new(&w, tracer.fog, &bare, &cam, 7, false, depth);
+        let (mut plain, mut shows) = (copy(&bare), 0);
         for k in 1..=300 {
+            if pig {
+                without.advance(k as f64 * STEP);
+                lay(&mut plain, &mut without);
+            }
             herd.advance(k as f64 * STEP);
             fresh.advance(k as f64 * STEP);
             lay(&mut kept, &mut herd);
             // everything painted again, over the picture without the animals
-            fresh.shown = Changes::new(fresh.animals.len());
+            fresh.shown = Changes::new(fresh.keys().len());
             let mut all = copy(&bare);
             lay(&mut all, &mut fresh);
-            assert!(kept.base == all.base && kept.light == all.light && kept.sun == all.sun, "step {k}");
+            assert!(kept.base == all.base && kept.light == all.light && kept.sun == all.sun, "step {k}, pig {pig}");
             changed += (all.base != bare.base) as usize;
+            shows += (pig && all.base != plain.base) as usize;
         }
         assert!(changed > 250, "the animals are seen: {changed}");
+        assert!(!pig || shows > 150, "the pig is seen: {shows} steps of 300");
     }
 }
