@@ -4,6 +4,9 @@
 //!   screen near DUMP #rrggbb     of the pixels, those within 24 of that colour in every channel
 //!   screen like DUMP PNG         of the pixels, those within 24 of the PNG's at the same place
 //!   screen differ DUMP DUMP      of the pixels, those that differ between the two
+//!   screen clicks                of the nine parts of $DISPLAY's screen, three by three, those where a
+//!                                click at the middle goes past retro-wall (and any frame it is in) to
+//!                                what is under it
 
 const TOLERANCE: u8 = 24;
 
@@ -85,6 +88,112 @@ fn share(w: usize, h: usize, step: usize, test: impl Fn(usize, usize) -> bool) -
     hits as f64 / all.max(1) as f64
 }
 
+/// Where a click would go at the middles of the nine parts of the screen (three by three), asked of the
+/// X server: the pointer put on each, and the window under it followed down from the root. The server
+/// answers with each window's input region applied, as it does for a real click. A point fails if that
+/// window is a retro-wall window or one it is inside (a window manager's frame). Each point is told on
+/// stderr; at least one must lie on a retro-wall window, or the test proves nothing.
+#[cfg(target_os = "linux")]
+fn clicks() -> f64 {
+    use std::os::raw::{c_int, c_uint, c_ulong};
+    use x11_dl::xlib;
+    let xl = xlib::Xlib::open().unwrap_or_else(|e| fail(format!("no Xlib: {e}")));
+    // SAFETY: a display opened here and used only here; XQueryTree's and XFetchName's data are Xlib's,
+    // checked for null and freed with XFree; out-pointers are locals.
+    unsafe {
+        let dpy = (xl.XOpenDisplay)(std::ptr::null());
+        if dpy.is_null() {
+            fail("no display".into());
+        }
+        let root = (xl.XDefaultRootWindow)(dpy);
+        let kids = |w: c_ulong| -> (c_ulong, Vec<c_ulong>) {
+            let (mut r, mut parent, mut list, mut n) = (0, 0, std::ptr::null_mut(), 0 as c_uint);
+            if (xl.XQueryTree)(dpy, w, &mut r, &mut parent, &mut list, &mut n) == 0 {
+                return (0, vec![]);
+            }
+            let v = if list.is_null() { vec![] } else { std::slice::from_raw_parts(list, n as usize).to_vec() };
+            if !list.is_null() {
+                (xl.XFree)(list as *mut _);
+            }
+            (parent, v)
+        };
+        let named = |w: c_ulong| {
+            let mut name = std::ptr::null_mut();
+            if (xl.XFetchName)(dpy, w, &mut name) == 0 || name.is_null() {
+                return false;
+            }
+            let ours = std::ffi::CStr::from_ptr(name).to_bytes() == b"retro-wall";
+            (xl.XFree)(name as *mut _);
+            ours
+        };
+        // the mapped retro-wall windows: where each is on the screen, and the windows it is inside
+        let mut walls: Vec<((c_int, c_int, c_int, c_int), Vec<c_ulong>)> = vec![];
+        let mut todo = vec![root];
+        while let Some(w) = todo.pop() {
+            let mut a: xlib::XWindowAttributes = std::mem::zeroed();
+            if (xl.XGetWindowAttributes)(dpy, w, &mut a) == 0 || (w != root && a.map_state != xlib::IsViewable) {
+                continue;
+            }
+            if w != root && named(w) {
+                let (mut x, mut y, mut child) = (0, 0, 0);
+                (xl.XTranslateCoordinates)(dpy, w, root, 0, 0, &mut x, &mut y, &mut child);
+                let mut up = vec![w];
+                loop {
+                    let (parent, _) = kids(*up.last().unwrap_or(&root));
+                    if parent == 0 || parent == root {
+                        break;
+                    }
+                    up.push(parent);
+                }
+                walls.push(((x, y, a.width, a.height), up));
+            }
+            todo.extend(kids(w).1);
+        }
+        let screen = (xl.XDefaultScreen)(dpy);
+        let (sw, sh) = ((xl.XDisplayWidth)(dpy, screen), (xl.XDisplayHeight)(dpy, screen));
+        let (mut back_x, mut back_y, mut wx, mut wy, mut mask, mut r, mut c) = (0, 0, 0, 0, 0 as c_uint, 0, 0);
+        (xl.XQueryPointer)(dpy, root, &mut r, &mut c, &mut back_x, &mut back_y, &mut wx, &mut wy, &mut mask);
+        let (mut passed, mut on_wall) = (0, 0);
+        for j in 0..3 {
+            for i in 0..3 {
+                let (px, py) = (sw * (2 * i + 1) / 6, sh * (2 * j + 1) / 6);
+                (xl.XWarpPointer)(dpy, 0, root, 0, 0, 0, 0, px, py);
+                (xl.XSync)(dpy, 0);
+                let mut under = root;
+                loop {
+                    let (mut rr, mut ch, mut rx, mut ry, mut x, mut y, mut m) = (0, 0, 0, 0, 0, 0, 0 as c_uint);
+                    if (xl.XQueryPointer)(dpy, under, &mut rr, &mut ch, &mut rx, &mut ry, &mut x, &mut y, &mut m) == 0 || ch == 0 {
+                        break;
+                    }
+                    under = ch;
+                }
+                let over = walls.iter().any(|((x, y, w, h), _)| px >= *x && py >= *y && px < x + w && py < y + h);
+                let taken = walls.iter().find(|(_, up)| up.contains(&under));
+                on_wall += over as usize;
+                let what = match taken {
+                    Some((_, up)) if up[0] == under => "retro-wall: FAIL",
+                    Some(_) => "the frame retro-wall is in: FAIL",
+                    None => "past retro-wall: ok",
+                };
+                passed += taken.is_none() as usize;
+                let place = if over { "on retro-wall" } else { "off retro-wall" };
+                eprintln!("clicks: part {} at {px},{py}, {place}, goes to 0x{under:x}, {what}", j * 3 + i + 1);
+            }
+        }
+        (xl.XWarpPointer)(dpy, 0, root, 0, 0, 0, 0, back_x, back_y);
+        (xl.XCloseDisplay)(dpy);
+        if on_wall == 0 {
+            fail("no part of the screen has a retro-wall window under its middle".into());
+        }
+        passed as f64 / 9.0
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn clicks() -> f64 {
+    fail("clicks: X11 only".into())
+}
+
 fn main() {
     let a: Vec<String> = std::env::args().skip(1).collect();
     let a: Vec<&str> = a.iter().map(String::as_str).collect();
@@ -106,7 +215,8 @@ fn main() {
             }
             share(p.w, p.h, 2, |x, y| p.at(x, y) != q.at(x, y))
         }
-        _ => fail("near DUMP #rrggbb | like DUMP PNG | differ DUMP DUMP".into()),
+        ["clicks"] => clicks(),
+        _ => fail("near DUMP #rrggbb | like DUMP PNG | differ DUMP DUMP | clicks".into()),
     };
     println!("{v}");
 }

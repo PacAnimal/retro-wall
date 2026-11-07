@@ -5,7 +5,8 @@
 #      settings recorded
 #   2. linux/install: retro-wall comes up once, starts at login, takes the user's config (a theme, and
 #      the example plugins) without a complaint, and moves on the screen; stopped, the desktop shows
-#      the still picture
+#      the still picture; a click anywhere on it goes to the desktop, past any frame the window manager
+#      put it in
 #   3. linux/install again, as an update: one retro-wall, moving again
 #   4. linux/uninstall: no retro-wall, the user's wallpaper on the screen, files and settings as in 1
 #
@@ -164,6 +165,7 @@ check "animating, not the still picture only" bash -c "! grep -q 'not animating'
 check "starts at login" test -f "$HOME/.config/autostart/retro-wall.desktop"
 check "the user's config taken, nothing refused" bash -c "! grep -E 'left out|^config:|^theme:|^widget |^layout:|panicked' '$share/retro-wall.log'"
 dump live-1; sleep 1; dump live-2
+v=$("$here/screen" clicks); check "installed: a click goes past it to the desktop in all nine parts of the screen ($v)" test "$v" = 1
 pkill -u "$(id -u)" -f "^$share/retro-wall( |\$)"   # stopped: the desktop's own picture shows
 sleep 3
 dump still
