@@ -1,8 +1,8 @@
 //! X11 and GLX: wallpaper windows (desktop type, below all others, on every workspace, off the taskbar,
-//! click-through), each with a GL context sharing the first one's objects, and what the display knows:
-//! monitors, panel struts, DPMS, which windows cover the desktop, and what the desktop's own window
-//! draws over its wallpaper (its icons), read from the pixmap the server keeps of it and followed by its
-//! damage.
+//! click-through, and so are the frames a window manager puts them in), each with a GL context sharing
+//! the first one's objects, and what the display knows: monitors, panel struts, DPMS, which windows cover
+//! the desktop, and what the desktop's own window draws over its wallpaper (its icons), read from the
+//! pixmap the server keeps of it and followed by its damage.
 
 use super::composite::{Composite, DamageNotify};
 use crate::platform::{Edges, Rect, Screen, WindowId};
@@ -410,6 +410,39 @@ impl X {
         // SAFETY: an open display; `vals` holds the count of 32-bit items said.
         unsafe { (self.xl.XChangeProperty)(self.dpy, win, name, kind, 32, xlib::PropModeReplace, vals.as_ptr() as *const c_uchar, vals.len() as c_int) };
     }
+
+    /// A window's input region emptied: clicks on it go to what is under it.
+    fn click_through(&self, win: c_ulong) {
+        // SAFETY: an open display; the region is made, used and freed here.
+        unsafe {
+            let region = (self.xf.XFixesCreateRegion)(self.dpy, null_mut(), 0);
+            (self.xf.XFixesSetWindowShapeRegion)(self.dpy, win, 2 /* ShapeInput */, 0, 0, region);
+            (self.xf.XFixesDestroyRegion)(self.dpy, region);
+        }
+    }
+
+    /// The frames a window manager put a window of ours in, up to the root, made click-through as the
+    /// window is: a frame keeps its own input region, and would take the clicks meant for the desktop.
+    fn frames_click_through(&self, mut win: c_ulong) {
+        // SAFETY: an open display; XQueryTree's out-pointers are locals, and its child list, when not
+        // null, is Xlib's and freed with XFree. A frame that has gone fails quietly (the error handler).
+        unsafe {
+            loop {
+                let (mut root, mut parent, mut kids, mut n) = (0, 0, null_mut(), 0);
+                if (self.xl.XQueryTree)(self.dpy, win, &mut root, &mut parent, &mut kids, &mut n) == 0 {
+                    return;
+                }
+                if !kids.is_null() {
+                    (self.xl.XFree)(kids as *mut _);
+                }
+                if parent == 0 || parent == root {
+                    return;
+                }
+                self.click_through(parent);
+                win = parent;
+            }
+        }
+    }
 }
 
 impl X {
@@ -567,9 +600,7 @@ impl crate::platform::Display for X {
                 (self.xl.XSetWMNormalHints)(self.dpy, win, size);
                 (self.xl.XFree)(size as *mut _);
             }
-            let region = (self.xf.XFixesCreateRegion)(self.dpy, null_mut(), 0);
-            (self.xf.XFixesSetWindowShapeRegion)(self.dpy, win, 2 /* ShapeInput */, 0, 0, region);
-            (self.xf.XFixesDestroyRegion)(self.dpy, region);
+            self.click_through(win);
             (self.xl.XMapWindow)(self.dpy, win);
             (self.xl.XMoveWindow)(self.dpy, win, x, y);
             (self.glx.glXMakeCurrent)(self.dpy, win, ctx);
@@ -643,7 +674,8 @@ impl crate::platform::Display for X {
         }
     }
 
-    /// A window moved by something else is put back, at most three times.
+    /// A window moved by something else is put back, at most three times. A window put in a frame
+    /// makes the frame click-through.
     fn events(&mut self) -> Vec<WindowId> {
         let mut exposed = vec![];
         // SAFETY: an open display; XEvent is plain data, filled in by XNextEvent and read as the variant its type says.
@@ -671,6 +703,7 @@ impl crate::platform::Display for X {
                             (self.xl.XMoveWindow)(self.dpy, id.0 as c_ulong, w.place.0, w.place.1);
                         }
                     }
+                    xlib::ReparentNotify if e.reparent.window == id.0 as c_ulong => self.frames_click_through(id.0 as c_ulong),
                     _ => {}
                 }
             }
