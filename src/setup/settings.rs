@@ -779,6 +779,16 @@ mod tests {
         // the theme it wrote is a theme the wall loads, extending blocky
         let own = std::fs::read_to_string(dir.join("themes/setup-blocky/theme.toml")).unwrap();
         assert!(own.contains("extends = \"blocky\"") && own.contains("hand = true") && own.contains("ui = false"), "{own}");
+        let bundled = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("themes/blocky/theme.toml");
+        std::fs::create_dir_all(dir.join("themes/blocky")).unwrap();
+        std::fs::copy(bundled, dir.join("themes/blocky/theme.toml")).unwrap();
+        let spec = dir.join("themes/setup-blocky/theme.toml").display().to_string();
+        let l = crate::config::load(&spec, &crate::config::Config::default(), crate::elements::kind_info, false).unwrap_or_else(|e| panic!("{}", e.0));
+        let world = l.plain.scene.iter().find(|e| e.kind == crate::elements::blocks::KIND).expect("the world");
+        assert_eq!(
+            (world.settings.get("hand").and_then(toml::Value::as_bool), world.settings.get("ui").and_then(toml::Value::as_bool)),
+            (Some(true), Some(false))
+        );
         // back to the theme's own: the files lose what the settings wrote, the user's lines stay
         // another theme: blocky's own theme is not left behind
         let other = Settings { theme: Some("winter".into()), hand: Some(true), ..Settings::default() };

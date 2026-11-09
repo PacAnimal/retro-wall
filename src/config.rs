@@ -327,6 +327,15 @@ fn clean_value(v: &mut Value) {
     }
 }
 
+/// An element's kind or a widget's type: its `type`, or with none its name (`[element.road]` is a
+/// road, `[widget.cpu]` a cpu). None where its `type` is not a name.
+pub fn type_or_name<'a>(name: &'a str, t: &'a Table) -> Option<&'a str> {
+    match t.get("type") {
+        None => Some(name),
+        Some(v) => v.as_str(),
+    }
+}
+
 /// The theme format this retro-wall reads. A theme says which it was written for (`format = 1`); one
 /// without says nothing and is read as 1. Settings, kinds and roles may be added within a format; one
 /// that is renamed, removed or read in another way makes the next.
@@ -837,11 +846,10 @@ pub fn resolve(spec: &str, cfg: &Config, kinds: Kinds, battery: bool) -> R<Loade
     let mut made = vec![];
     for n in &scene {
         let mut t = settings.get(n).cloned().unwrap_or_default();
-        let kind = match t.remove("type") {
-            None => n.clone(),
-            Some(Value::String(k)) => k,
-            Some(v) => return err(format!("{spec}: element.{n}.type is {v}: a kind's name")),
+        let Some(kind) = type_or_name(n, &t).map(String::from) else {
+            return err(format!("{spec}: element.{n}.type is {}: a kind's name", t["type"]));
         };
+        t.remove("type");
         let Some(info) = kinds(&kind) else {
             return err(format!("{spec}: the scene's {n:?} is a {kind:?}, and there is no such element (retro-wall --list)"));
         };
@@ -884,7 +892,7 @@ pub fn resolve(spec: &str, cfg: &Config, kinds: Kinds, battery: bool) -> R<Loade
     }
     for (n, t) in &settings {
         if !scene.contains(n) {
-            let kind = t.get("type").and_then(|t| t.as_str()).unwrap_or(n);
+            let kind = type_or_name(n, t).unwrap_or(n);
             if kinds(kind).is_none() {
                 return err(format!("{spec}: element.{n}: the scene has no {n:?}, and there is no such element"));
             }
@@ -897,7 +905,7 @@ pub fn resolve(spec: &str, cfg: &Config, kinds: Kinds, battery: bool) -> R<Loade
         widgets.entry(k.clone()).or_default().extend(v.clone());
     }
     let source = |widgets: &BTreeMap<String, Table>, w: &str| widgets.get(w).and_then(|t| t.get("source")).and_then(|s| s.as_str()).unwrap_or("").to_string();
-    let kind_of = |widgets: &BTreeMap<String, Table>, w: &str| widgets.get(w).and_then(|t| t.get("type")).and_then(|s| s.as_str()).unwrap_or(w).to_string();
+    let kind_of = |widgets: &BTreeMap<String, Table>, w: &str| widgets.get(w).map_or(Some(w), |t| type_or_name(w, t)).unwrap_or(w).to_string();
     let battery_widget = |widgets: &BTreeMap<String, Table>, w: &str| source(widgets, w) == "bat" || kind_of(widgets, w) == "battery";
     let user_layout = cfg.groups.is_some();
     let mut groups = match (&cfg.groups, layout) {

@@ -298,7 +298,7 @@ impl Instruments {
         for gr in groups {
             for n in &gr.widgets {
                 let spec = th.widgets.get(n);
-                let kind = spec.and_then(|t| t.get("type")).and_then(|t| t.as_str()).unwrap_or(n);
+                let kind = spec.map_or(Some(n.as_str()), |t| crate::config::type_or_name(n, t)).unwrap_or(n);
                 // the status line is a header piece of its own: a theme can show it apart from the rest
                 if !g.header.contains(if kind == "status" { Piece::Status } else { Piece::Widgets }) {
                     continue;

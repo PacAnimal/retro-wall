@@ -114,6 +114,11 @@ fn the_world_of_blocks_is_found_in_its_theme() {
         let Ok(text) = std::fs::read_to_string(e.path().join("theme.toml")) else { continue };
         assert_eq!(elements::blocks::in_theme(&text), e.file_name() == "blocky", "{}", e.path().display());
     }
+    let world = elements::blocks::KIND;
+    assert!(elements::blocks::in_theme(&format!("scene = [\"{world}\"]")), "by its name in the scene");
+    assert!(elements::blocks::in_theme(&format!("[element.mine]\ntype = \"{world}\"")), "by its type");
+    assert!(!elements::blocks::in_theme(&format!("[element.{world}]\ntype = \"sky\"")), "its name, another kind");
+    assert!(!elements::blocks::in_theme("scene = [\"sky\"]\n[element.sky]\ntype = \"sky\""));
 }
 
 #[test]

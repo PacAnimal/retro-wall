@@ -199,11 +199,19 @@ struct Program {
 pub const KIND: &str = "block-world";
 
 /// Whether a theme file has a world of blocks, whose interface and hand the settings can change: an
-/// element of this kind in its `[element]` tables, by its `type` or, with none, by its name.
+/// element of this kind in its scene or its `[element]` tables (`config::type_or_name`). What it has
+/// only through `extends` is not looked for.
 pub fn in_theme(text: &str) -> bool {
-    let Ok(t) = text.parse::<toml::Table>() else { return false };
-    let kind = |(name, e): (&String, &toml::Value)| e.get("type").and_then(toml::Value::as_str).unwrap_or(name) == KIND;
-    t.get("element").and_then(toml::Value::as_table).is_some_and(|els| els.iter().any(kind))
+    use toml::{Table, Value};
+    let Ok(t) = text.parse::<Table>() else { return false };
+    let empty = Table::new();
+    let tables = t.get("element").and_then(Value::as_table).unwrap_or(&empty);
+    let scene = t.get("scene").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str);
+    let is_world = |name: &str| {
+        let own = tables.get(name).and_then(Value::as_table).unwrap_or(&empty);
+        crate::config::type_or_name(name, own) == Some(KIND)
+    };
+    scene.chain(tables.keys().map(String::as_str)).any(is_world)
 }
 
 impl Program {

@@ -33,9 +33,10 @@ jobs:
         # waits for a run still going (a tag pushed with its commit), up to an hour
         run: |
           runs() { gh run list --repo "$GITHUB_REPOSITORY" --workflow test.yml --commit "$GITHUB_SHA" --json status,conclusion --jq "$1"; }
-          for _ in $(seq 60); do
+          for i in $(seq 60); do
             test "$(runs '[.[] | select(.conclusion == "success")] | length')" -gt 0 && exit 0
-            test "$(runs '[.[] | select(.status != "completed")] | length')" -gt 0 || break
+            # none running: done, unless the tag's own run is not listed yet (the first minutes)
+            test "$(runs '[.[] | select(.status != "completed")] | length')" -gt 0 || test "$i" -le 5 || break
             sleep 60
           done
           echo "the test workflow has not passed on $GITHUB_SHA: tag a commit whose tests pass, then run this again"

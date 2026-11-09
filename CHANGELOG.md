@@ -3,6 +3,14 @@
 Each release, newest first. A change to an interface in "What stays stable" (`EXTENDING.md`) is said
 here with its new number.
 
+## v0.1.1
+
+- The Windows setup program finds a world of blocks in a theme's scene as well as in its `[element]`
+  tables, so a theme of your own that names `block-world` in its scene gets its settings.
+- A test loads the theme the setup program writes, not only its text.
+- One rule for an element's kind and a widget's type: its `type`, or with none its name.
+- A release waits for the tests of its tag's commit to be listed, then to pass.
+
 ## v0.1.0
 
 The first release.
