@@ -606,7 +606,7 @@ impl Copies {
 // --- the painting ------------------------------------------------------------------------------------
 
 /// The forest (still): every piece of it in one layer, and the water's mask left for the river.
-struct Forest {
+struct Woodland {
     st: Settings,
 }
 
@@ -618,13 +618,13 @@ pub struct Water {
     flow: (f64, f64),
 }
 
-impl Forest {
-    fn new(t: &Table) -> Forest {
-        Forest { st: settings(t) }
+impl Woodland {
+    fn new(t: &Table) -> Woodland {
+        Woodland { st: settings(t) }
     }
 }
 
-impl Part for Forest {
+impl Part for Woodland {
     fn still(&self) -> bool {
         true
     }
@@ -1232,7 +1232,7 @@ impl Part for River {
 
 pub fn kinds() -> Vec<crate::elements::Kind> {
     vec![crate::elements::Kind {
-        name: "forest",
+        name: "woodland",
         defaults: r##"ground = ""
 path = ""
 bed = ""
@@ -1269,7 +1269,7 @@ saturation = 1.0"##,
         make: |_, t, _g| {
             let st: Settings = settings(t);
             let fps = st.fps;
-            let mut parts: Vec<Box<dyn Part>> = vec![Box::new(Forest::new(t))];
+            let mut parts: Vec<Box<dyn Part>> = vec![Box::new(Woodland::new(t))];
             if st.river > 0.0 {
                 parts.push(Box::new(River { fps, t: 0.0, backdrop: None, mask: None, flow: DOWN, area: (0.0, 0.0, 0.0, 0.0), program: None }));
             }
@@ -1289,7 +1289,7 @@ mod tests {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("themes/forest");
         let l = crate::config::resolve(&path.display().to_string(), &crate::config::Config::default(), crate::elements::kind_info, true)
             .unwrap_or_else(|e| panic!("{}", e.0));
-        let e = l.plain.scene.iter().find(|e| e.kind == "forest").expect("a forest");
+        let e = l.plain.scene.iter().find(|e| e.kind == "woodland").expect("a forest");
         let st: Settings = settings(&e.settings);
         let g = Geo::new(1920, 1080, "retro", Edges::NONE, Header::NONE, None, l.plain.clone());
         let pics = Pictures::load(&g, &st);

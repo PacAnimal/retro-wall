@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Making a theme, a measurement or an instrument
+    url: https://github.com/PacAnimal/retro-wall/blob/main/EXTENDING.md
+    about: How each is made, with working examples

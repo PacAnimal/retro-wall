@@ -4,7 +4,7 @@
 //! The time of day comes from `day::daytime()`; the sun's hours from the theme's `day` tweak.
 
 use crate::config::Theme;
-use crate::elements::{Validate, check, settings, within};
+use crate::elements::{Validate, band, check, settings, within};
 use crate::gfx::{Blend, Gfx, Kind, Tex, Uploads};
 use crate::rng::Rng;
 use crate::scene::*;
@@ -295,7 +295,7 @@ impl Orb {
         let (sun, moon, elevation, light, dusk) = at(&g.th, f);
         let mut out = vec![];
         for (along, name, colour, strength) in
-            [(sun, DISC, mixed(self.low.rgb(), self.sun.rgb(), smooth_ab(0.0, 0.35, elevation)), 0.95), (moon, MOON, self.moon.rgb(), 0.9 * (1.0 - light))]
+            [(sun, DISC, mixed(self.low.rgb(), self.sun.rgb(), smoothstep(0.0, 0.35, elevation)), 0.95), (moon, MOON, self.moon.rgb(), 0.9 * (1.0 - light))]
         {
             if !(-0.08 < along && along < 1.08) || strength < 0.02 {
                 continue;
@@ -1165,7 +1165,7 @@ impl Beams {
     /// All rays at time t, time of day f, drawn over `image` (cleared first); false without the sun.
     fn overlay(&self, image: &ImageSurface, g: &Geo, t: f64, f: f64) -> bool {
         let (sun, _, elevation, light, dusk) = at(&g.th, f);
-        let strength = self.alpha * light.max(0.9 * dusk) * smooth_ab(-0.04, 0.03, elevation);
+        let strength = self.alpha * light.max(0.9 * dusk) * smoothstep(-0.04, 0.03, elevation);
         let Some(peak) = self.orb else { return false };
         if strength < 0.002 {
             return false;
@@ -1179,7 +1179,7 @@ impl Beams {
             c.scale(1.0 / k, 1.0 / k);
             let (x, y) = orb_where(g, peak, sun);
             let reach = self.length * g.w.max(g.h) as f64;
-            let colour = mixed(self.low.rgb(), self.colour.rgb(), smooth_ab(0.0, 0.4, elevation));
+            let colour = mixed(self.low.rgb(), self.colour.rgb(), smoothstep(0.0, 0.4, elevation));
             let beam = self.beam.as_ref().unwrap();
             let (w, h) = (beam.width() as f64, beam.height() as f64);
             for &(angle, width, phase, rate, own) in &self.rays {
@@ -1299,13 +1299,7 @@ struct DriftSettings {
 
 impl Validate for DriftSettings {
     fn validate(&self) -> Result<(), String> {
-        let [top, bottom] = self.band;
-        if !(0.0 <= top && top < bottom && bottom <= 1.0) {
-            return Err("band is [top, bottom], fractions of the picture's height, top first".into());
-        }
-        if bottom - top < 0.02 {
-            return Err("band is at least 0.02 of the picture's height".into());
-        }
+        band(self.band)?;
         within("speed", self.speed, -100.0, 100.0)?;
         within("alpha", self.alpha, 0.0, 1.0)?;
         within("wisps", self.wisps as f64, 0.0, 200.0)?;

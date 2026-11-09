@@ -5,7 +5,16 @@
 
 use cairo::{Format, ImageSurface};
 use gl::types::*;
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
+
+/// The current GL context's renderer, as its driver names it; empty if it gives none.
+pub fn renderer() -> String {
+    // SAFETY: a context is current; GetString gives null or a NUL-terminated string the driver keeps.
+    unsafe {
+        let p = gl::GetString(gl::RENDERER);
+        if p.is_null() { String::new() } else { CStr::from_ptr(p.cast()).to_string_lossy().into_owned() }
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Blend {

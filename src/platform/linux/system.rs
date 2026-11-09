@@ -94,17 +94,7 @@ pub fn disk_ios() -> u64 {
     ios
 }
 
-pub fn drive_space(path: &str) -> Option<(f64, f64)> {
-    let c = std::ffi::CString::new(path).ok()?;
-    // SAFETY: statvfs is plain data: zeroed is a valid value.
-    let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
-    // SAFETY: a NUL-terminated path and a valid out-pointer.
-    if unsafe { libc::statvfs(c.as_ptr(), &mut st) } != 0 || st.f_blocks == 0 {
-        return None;
-    }
-    let (total, free) = (st.f_blocks as f64 * st.f_frsize as f64, st.f_bavail as f64 * st.f_frsize as f64);
-    Some((100.0 * (total - free) / total, 100.0 * free / total))
-}
+pub use crate::platform::unix::drive_space;
 
 pub fn net_counts(only: &[String]) -> HashMap<String, (u64, u64)> {
     let mut out = HashMap::new();
@@ -121,12 +111,6 @@ pub fn net_counts(only: &[String]) -> HashMap<String, (u64, u64)> {
         }
     }
     out
-}
-
-fn primary_address() -> Option<String> {
-    let s = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
-    s.connect("1.1.1.1:53").ok()?;
-    Some(s.local_addr().ok()?.ip().to_string())
 }
 
 /// The default routes in a /proc/net/route table.
@@ -148,7 +132,7 @@ pub fn default_routes(table: &str) -> Vec<crate::platform::Route> {
 }
 
 pub fn addresses() -> (Option<String>, Option<String>) {
-    (primary_address(), std::fs::read_to_string("/proc/net/route").ok().and_then(|t| crate::platform::gateway(&default_routes(&t))))
+    (crate::platform::primary_address(), std::fs::read_to_string("/proc/net/route").ok().and_then(|t| crate::platform::gateway(&default_routes(&t))))
 }
 
 pub fn hostname() -> String {

@@ -76,7 +76,7 @@ writes it a line of JSON, and it answers with a line: a list of drawing operatio
 It is asked:
 
 ```json
-{"width": 172, "height": 117, "scale": 0.57, "value": 46.0, "indicator": false, "text": null,
+{"protocol": 1, "width": 172, "height": 117, "scale": 0.57, "value": 46.0, "indicator": false, "text": null,
  "stale": false, "settings": {"label": "CPU", "source": "cpu"}, "palette": {...},
  "colours": {"needle": "#ff4fb0", "lines": "#4fb6d6", "caption": "#4fb6d6", "fill": "#05040b"}}
 ```
@@ -105,6 +105,10 @@ widget's own table: anything you put there reaches the face. Its size in the lay
 shows ERR in its place, and is started again later. `--snapshot` waits for each face's first answer,
 or its two seconds, before it draws.
 
+`protocol` is the plugin protocol (below, "What stays stable"); every plugin also has it in its
+environment, `RETRO_PROTOCOL`. A face skips what it does not know: a field or an operation can be added
+without a new protocol.
+
 A face in sh can ignore its requests and print the same drawing each time (what `--new face` writes),
 or pick the numbers it needs out of the line (`examples/faces/level`); one that reads all of it is best
 written in a language with a JSON parser.
@@ -116,7 +120,7 @@ over whichever theme is chosen, so hiding, moving or changing a part of a theme 
 own:
 
 ```toml
-[element.world]           # blocky's world: its interface off, the hand on
+[element.block-world]     # blocky's world: its interface off, the hand on
 ui = false
 hand = true
 
@@ -265,6 +269,22 @@ and a broken widget shows ERR. `retro.toml` is checked item by item: a widget, a
 setting that does not check is said and left out, and the rest is kept; where your settings break one
 of the theme's widgets, it keeps the theme's own. Nothing you add can stop the wall.
 
+## What stays stable
+
+What you write against retro-wall keeps working across its releases. Each of these changes only with a
+new number, said in the release notes:
+
+| Interface | Its number | Within a number |
+|---|---|---|
+| A theme: its tables and keys, the palette's roles, the tweaks, the element kinds and their settings | `format = 1` in `theme.toml` (none is 1) | Keys, roles, tweaks, kinds and settings can be added. None is renamed or removed, and none is read in another way |
+| `retro.toml`: its tables and keys | The theme format: a new format changes both | The same as a theme |
+| Sources and faces: what a source prints, a face's request and its operations | `"protocol": 1` in a face's request; `RETRO_PROTOCOL` in every plugin's environment | Fields and operations can be added. A plugin skips what it does not know |
+| The command line and the paths (`~/.config/retro/...`) | The version, `retro-wall --version` | Options can be added; a removed one is said for a release first |
+
+A theme of a newer format than the retro-wall that reads it is said ("written for a newer retro-wall")
+and the default is drawn in its place. The Rust inside retro-wall (`src/`) has no such promise: a kind
+of element of your own is built with retro-wall, and changes with it.
+
 ## In code: a new kind of element
 
 A theme is made of elements; each element is of a kind (`type = "KIND"`), and a kind is Rust in
@@ -274,8 +294,13 @@ tests need an X display; under Xvfb, `RETRO_REQUIRE_XVFB=1` makes their absence 
 
 ### 1. The file and its registration
 
-`src/elements/NAME.rs`, and in `src/elements/mod.rs` a `pub mod NAME;` and, in `registry()`,
-`v.extend(NAME::kinds());`. `retro-wall --list` and `--settings` then show it, and themes can name it.
+`src/elements/NAME.rs`, and in `src/elements/mod.rs` a `pub mod NAME;` and, in `MODULES`,
+`module(NAME::kinds)`. `retro-wall --list` and `--settings` then show it, and themes can name it. A
+module that keeps something only while a scene is built (a cache of pictures its parts share) lets it go
+in a `built` function of its own: `Module { kinds: NAME::kinds, built: Some(NAME::built) }`.
+
+A kind's name says what it draws (`northern-lights`, `road`), not the theme it was made for: a theme's
+name is for `--theme` and `extends`, and a test keeps the two apart.
 
 ```rust
 pub fn kinds() -> Vec<crate::elements::Kind> {
@@ -349,7 +374,7 @@ whatever part of the screen the live window covers. Colours on the GPU are premu
 | `gfx.image(tex, x, y, w, h, strength, blend)` | a texture over a rectangle |
 | `gfx.rects(tex, &[(x0, y0, x1, y1, alpha)], rgb, blend)` | rectangles, plain or textured |
 | `gfx.replace_bytes(tex, &bytes, x, y, w, h)` | new pixels for part of a texture (premultiplied B, G, R, A rows) |
-| `gfx.compile`, `gfx.uniform`, `gfx.custom` | a fragment shader of the part's own (see `elements/racing.rs`) |
+| `gfx.compile`, `gfx.uniform`, `gfx.custom` | a fragment shader of the part's own (see `elements/road/`, its GLSL in `shaders.rs`) |
 
 `util` makes the quads and pictures: `sprite_vertices` (sprites placed, sized, turned, tinted),
 `image_quad`, `fill_quad`, `soft_dot` (a round glow), `surface` and `view` (a cairo picture and its
@@ -357,6 +382,10 @@ bytes), `picture` (bytes to a picture), and `paint_vertices`, which draws quads 
 `Blend` is `Premultiplied` for most, `Opaque`, `Alpha`, `Screen` or `Add`. A texture's `Kind` says how
 it is sampled: `Label` pixel for pixel, `Sprite` scaled and turned, `Pixel` sharp pixel art, `Smooth`
 filtered.
+
+Numbers the same on every start: `rng::Rng` (seed it from the element's settings and `rng::run_seed`),
+`rng::lattice` (bits for a point of a grid), `util::smooth` and `util::smoothstep` (eased 0 to 1). Use
+these before you write your own.
 
 Readings: `w.reading("cpu")` is a source's value, 0 to 100, and its indicator; any source a user has
 works by name. Under `--snapshot` and `--demo` readings and the clock are fixed (`w.frozen`, `w.demo`),
@@ -485,7 +514,7 @@ its colours. The way it goes:
    leaves out only pixels the scene is nearer than the whole model; compare each hit's `t` with the
    region's depth.
 5. A picture that is the same each start (the traced backdrop) can be kept in the theme's cache:
-   `svg::kept_bytes`, as `elements/blocky/` does.
+   `svg::kept_bytes`, as `elements/blocks/` does.
 
 ```rust
 //! orrery: a sun traced once, a planet moving round it, traced each frame where it moved.
@@ -635,9 +664,9 @@ period = 20.0"##,
 }
 ```
 
-`elements/blocky/` is the whole of what the core can carry: a world of blocks traced on every core,
+`elements/blocks/` is the whole of what the core can carry: a world of blocks traced on every core,
 lit each frame by the time of day on the GPU, animals as rigs walking over the traced picture, the
-trace kept in the cache. Start from the orrery; read blocky for each next thing.
+trace kept in the cache. Start from the orrery; read `elements/blocks/` for each next thing.
 
 ### 7. Seeing it, and shipping it
 

@@ -527,7 +527,7 @@ fn rect(g: &Ground, y: f64, cam: &Camera) -> (i32, i32, i32, i32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::elements::blocky::render::Tracer;
+    use crate::elements::blocks::render::Tracer;
 
     #[test]
     fn animals_keep_to_their_ground_and_clear_of_each_other() {

@@ -127,8 +127,8 @@ fn cloud_at(map: &[bool], eye: V3, d: V3, shift: f64, m: &Moment) -> [f64; 4] {
         if map[my * CLOUD_MAP + mx] {
             let k = [0.86, 0.74, 0.92][face];
             let far = t * dd[0].hypot(dd[1]);
-            let fade = 1.0 - smooth_ab(CLOUD_FADE.0, CLOUD_FADE.1, far);
-            let mist = 0.55 * smooth_ab(CLOUD_FADE.0 * 0.4, CLOUD_FADE.1, far);
+            let fade = 1.0 - smoothstep(CLOUD_FADE.0, CLOUD_FADE.1, far);
+            let mist = 0.55 * smoothstep(CLOUD_FADE.0 * 0.4, CLOUD_FADE.1, far);
             let a = 0.82 * fade;
             let lit = [k * m.cloud.0, k * m.cloud.1, k * m.cloud.2];
             let haze = [m.haze.0, m.haze.1, m.haze.2];
@@ -195,19 +195,30 @@ struct Program {
     at: Vec<GLint>,
 }
 
+/// The kind's name: what a theme's `type =` says.
+pub const KIND: &str = "block-world";
+
+/// Whether a theme file has a world of blocks, whose interface and hand the settings can change: an
+/// element of this kind in its `[element]` tables, by its `type` or, with none, by its name.
+pub fn in_theme(text: &str) -> bool {
+    let Ok(t) = text.parse::<toml::Table>() else { return false };
+    let kind = |(name, e): (&String, &toml::Value)| e.get("type").and_then(toml::Value::as_str).unwrap_or(name) == KIND;
+    t.get("element").and_then(toml::Value::as_table).is_some_and(|els| els.iter().any(kind))
+}
+
 impl Program {
     fn compile(gfx: &Gfx, src: &str, names: &[&str]) -> Option<Program> {
         match gfx.compile(&format!("{}{src}", sky::RAY)) {
             Ok(prog) => Some(Program { prog, at: RAY_UNIFORMS.iter().chain(names).map(|n| gfx.uniform(prog, n)).collect() }),
             Err(e) => {
-                crate::errln!("blocky: a shader does not compile: {e}");
+                crate::errln!("{KIND}: a shader does not compile: {e}");
                 None
             }
         }
     }
 }
 
-pub struct Blocky {
+pub struct BlockWorld {
     s: Settings,
     seed: i64,
     /// The hours the sun is up.
@@ -243,11 +254,11 @@ pub struct Blocky {
 /// The world's seed: the same farm, hills and woods every start.
 const WORLD: i64 = 7;
 
-impl Blocky {
-    fn new(t: &Table, g: &Geo) -> Blocky {
+impl BlockWorld {
+    fn new(t: &Table, g: &Geo) -> BlockWorld {
         let s: Settings = settings(t);
         let seed = if s.seed != 0 { s.seed } else { WORLD };
-        Blocky {
+        BlockWorld {
             seed,
             day: g.th.tw.day,
             clouds: cloud_map(seed),
@@ -292,7 +303,7 @@ impl Blocky {
         let seed = self.seed;
         let (mut w, kept) = std::thread::scope(|sc| {
             let world = sc.spawn(move || world::World::unlit(seed, (yaw.sin(), yaw.cos())));
-            let kept = theme.as_ref().and_then(|t| crate::svg::kept_read(t, g.w, g.h, "blocky", &tag));
+            let kept = theme.as_ref().and_then(|t| crate::svg::kept_read(t, g.w, g.h, KIND, &tag));
             (world.join().unwrap_or_else(|e| std::panic::resume_unwind(e)), kept)
         });
         let tex = textures::Textures::new(self.seed);
@@ -332,7 +343,7 @@ impl Blocky {
             None => {
                 let bytes = trace(&mut w);
                 if let Some(t) = &theme {
-                    crate::svg::keep(t, g.w, g.h, "blocky", &tag, &bytes);
+                    crate::svg::keep(t, g.w, g.h, KIND, &tag, &bytes);
                 }
                 self.unpack(&w, fog, &cam, &bytes).expect("a fresh trace unpacks")
             }
@@ -460,7 +471,7 @@ impl Mean {
     }
 }
 
-impl Part for Blocky {
+impl Part for BlockWorld {
     fn passes(&self) -> &'static [Pass] {
         PASSES
     }
@@ -708,7 +719,7 @@ impl Part for Blocky {
 
 pub fn kinds() -> Vec<crate::elements::Kind> {
     vec![crate::elements::Kind {
-        name: "blocky",
+        name: KIND,
         defaults: r##"seed = 0
 yaw = 35.0
 pitch = -13.0
@@ -729,7 +740,7 @@ experience = "disk"
 level = "used""##,
         varies: &[],
         check: check::<Settings>,
-        make: |_, t, g| Ok(vec![Box::new(Blocky::new(t, g))]),
+        make: |_, t, g| Ok(vec![Box::new(BlockWorld::new(t, g))]),
     }]
 }
 

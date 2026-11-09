@@ -569,53 +569,16 @@ pub struct Ticks {
     marks: Vec<(f64, f64, f64, f64, f64)>,
 }
 
-/// The pixels a span from a to b covers, as `util::spans` gives them, without allocating.
-fn each_span(a: f64, b: f64, mut f: impl FnMut(f64, f64, f64)) {
-    let (fa, fb) = (a.floor(), b.floor());
-    if fa == fb {
-        if b > a {
-            f(fa, fa + 1.0, b - a);
-        }
-        return;
-    }
-    if a > fa {
-        f(fa, fa + 1.0, fa + 1.0 - a);
-    }
-    let start = if a > fa { fa + 1.0 } else { fa };
-    if fb > start {
-        f(start, fb, 1.0);
-    }
-    if b > fb {
-        f(fb, fb + 1.0, b - fb);
-    }
-}
-
 impl Ticks {
     /// The ticks at an offset into `self.marks`, and their colour.
     fn marks(&mut self, g: &Geo, ruler: Ruler, offset: f64) -> (f64, f64, f64) {
         let th = &g.th;
-        let (w, h) = (g.w as f64, g.h as f64);
-        let Ruler { left, stop, y } = ruler;
-        let step = 0.012 * w;
-        let right = stop + 0.05 * w;
-        let (cx, cy, big) = (w / 2.0, h / 2.0, w.max(h));
-        let reach = ((left + stop) / 2.0 - cx).hypot(y - cy);
-        let dark = th.tw.vignette * 1f64.min(0f64.max((reach - 0.35 * big) / (0.4 * big)));
+        let y = ruler.y;
         let marks = &mut self.marks;
         marks.clear();
-        let mut k: i64 = -5;
-        loop {
-            let x = right - k as f64 * step - offset;
-            k += 1;
-            if x > stop {
-                continue;
-            }
-            if x < left {
-                break;
-            }
-            let tall = if (k - 1) % 5 == 0 { 4.0 } else { 2.0 };
-            each_span(y - tall, y, |ya, yb, cy| each_span(x, x + 1.0, |xa, xb, cx| marks.push((xa, ya, xb, yb, 0.55 * cx * cy))));
-        }
+        let dark = ruler.each_tick(&th.tw, g.w as f64, g.h as f64, offset, |x, tall| {
+            each_span(y - tall, y, |ya, yb, cy| each_span(x, x + 1.0, |xa, xb, cx| marks.push((xa, ya, xb, yb, 0.55 * cx * cy))))
+        });
         let cap = th.tw.caption.rgb();
         (cap.0 * (1.0 - dark), cap.1 * (1.0 - dark), cap.2 * (1.0 - dark))
     }

@@ -456,6 +456,21 @@ impl Farm<'_> {
     }
 }
 
+/// A tunnel's frame `along` into it (`at` gives a block's place by its depth and its side): two posts
+/// of oak, three high, and planks over them.
+fn timbers(w: &mut World, at: &impl Fn(i32, i32) -> (i32, i32), along: i32, floor: i32) {
+    for side in [-2, 2] {
+        let (x, z) = at(along, side);
+        for y in floor..floor + 3 {
+            w.set(x, y, z, OAK_LOG);
+        }
+    }
+    for side in -2..=2 {
+        let (x, z) = at(along, side);
+        w.set(x, floor + 3, z, PLANKS);
+    }
+}
+
 /// The mine: an opening in the knoll's face towards the viewer: a frame of logs and planks, rails
 /// running in, torches inside, lanterns at the door.
 fn mine(w: &mut World, ahead: (f64, f64)) {
@@ -501,16 +516,7 @@ fn mine(w: &mut World, ahead: (f64, f64)) {
     }
     // the frame at its mouth and every four blocks in
     for along in [0, 4, 8, 12] {
-        for side in [-2, 2] {
-            let (x, z) = at(along, side);
-            for y in floor..floor + 3 {
-                w.set(x, y, z, OAK_LOG);
-            }
-        }
-        for side in -2..=2 {
-            let (x, z) = at(along, side);
-            w.set(x, floor + 3, z, PLANKS);
-        }
+        timbers(w, &at, along, floor);
     }
     for along in -4..16 {
         let (x, z) = at(along, 0);
@@ -903,16 +909,7 @@ fn shaft(w: &mut World, ahead: (f64, f64)) {
     }
     // the frame at its mouth and every four blocks in
     for along in (0..deep - 1).step_by(4) {
-        for side in [-2, 2] {
-            let (x, z) = at(along, side);
-            for y in floor..floor + 3 {
-                w.set(x, y, z, OAK_LOG);
-            }
-        }
-        for side in -2..=2 {
-            let (x, z) = at(along, side);
-            w.set(x, floor + 3, z, PLANKS);
-        }
+        timbers(w, &at, along, floor);
     }
     for along in -3..deep {
         let (x, z) = at(along, 0);

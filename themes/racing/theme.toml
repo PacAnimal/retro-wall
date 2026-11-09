@@ -12,6 +12,7 @@
 # tweak is the hours the sun is up. --demo HH:mm holds the time of day, to see the sunset at noon.
 #
 # The pictures are SVGs beside this file, each named in [element.road]: put your own in their place.
+format = 1                  # the theme format it is written for: EXTENDING.md, "What stays stable"
 name = "Racing"
 
 scene = ["road", "title", "instruments", "finish"]
@@ -46,4 +47,3 @@ ruler_end = 0.0
 vignette = 0.25
 
 [element.road]
-type = "racing"

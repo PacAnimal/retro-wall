@@ -171,28 +171,6 @@ fn cuts_at(rest: &[(f64, f64)], hz: f64, u: f64, heat: Heat, t: f64, out: &mut V
     }));
 }
 
-/// The pixels a span from a to b covers, as (first, last + 1, coverage), partly covered ones split off
-/// (as `util::spans`, without a list).
-fn each_span(a: f64, b: f64, mut f: impl FnMut(f64, f64, f64)) {
-    let (fa, fb) = (a.floor(), b.floor());
-    if fa == fb {
-        if b > a {
-            f(fa, fa + 1.0, b - a);
-        }
-        return;
-    }
-    if a > fa {
-        f(fa, fa + 1.0, fa + 1.0 - a);
-    }
-    let start = if a > fa { fa + 1.0 } else { fa };
-    if fb > start {
-        f(start, fb, 1.0);
-    }
-    if b > fb {
-        f(fb, fb + 1.0, b - fb);
-    }
-}
-
 /// The columns the shimmer moves: around the sun, and its bloom.
 fn shimmer_x(th: &Theme, width: i32, height: i32) -> (f64, f64) {
     let sun = sun_xy(th);

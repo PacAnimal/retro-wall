@@ -688,11 +688,7 @@ impl crate::platform::Display for Win {
     }
 
     fn renderer(&self) -> String {
-        // SAFETY: a context is current; GL returns a static string or null.
-        unsafe {
-            let p = gl::GetString(gl::RENDERER);
-            if p.is_null() { String::new() } else { CStr::from_ptr(p.cast()).to_string_lossy().into_owned() }
-        }
+        crate::gfx::renderer()
     }
 
     /// Windows' messages handled; the panes that need drawing again, all of them after Explorer

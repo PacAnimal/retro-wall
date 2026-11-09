@@ -6,6 +6,7 @@
 //! torches', spread from each, both a level less a block.
 
 use crate::rng::Rng;
+use crate::util::smoothstep;
 
 /// The world reaches this far either way across from the viewer, in blocks.
 pub const R: i32 = 208;
@@ -258,11 +259,7 @@ impl Noise {
         Noise { seed: (seed as u64) ^ salt.wrapping_mul(0x9e37_79b9_7f4a_7c15) }
     }
     fn lattice(&self, x: i64, z: i64) -> f64 {
-        let mut h = self.seed ^ (x as u64).wrapping_mul(0xd1b5_4a32_d192_ed03) ^ (z as u64).wrapping_mul(0xabc9_8388_fb8f_ac03);
-        h = (h ^ (h >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-        h = (h ^ (h >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-        h ^= h >> 31;
-        (h >> 11) as f64 / (1u64 << 53) as f64
+        crate::rng::unit(self.seed ^ (x as u64).wrapping_mul(0xd1b5_4a32_d192_ed03) ^ (z as u64).wrapping_mul(0xabc9_8388_fb8f_ac03))
     }
     /// 0 to 1.
     pub fn at(&self, x: f64, z: f64) -> f64 {
@@ -299,11 +296,6 @@ impl Noise {
         }
         sum / norm
     }
-}
-
-pub fn smoothstep(a: f64, b: f64, x: f64) -> f64 {
-    let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
 }
 
 /// Where the viewer looks across the ground: a unit vector, x then z.

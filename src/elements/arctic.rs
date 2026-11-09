@@ -5,7 +5,7 @@
 //! that drift and sway. The water reuses the same slices for its reflection.
 
 use crate::config::Theme;
-use crate::elements::{Validate, check, each, parse, settings, within};
+use crate::elements::{Validate, band, check, each, parse, settings, within};
 use crate::gfx::{Blend, Gfx, Kind, Tex, Uploads};
 use crate::rng::Rng;
 use crate::scene::*;
@@ -136,7 +136,7 @@ pub struct Sky {
 /// The aurora's settings.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct AuroraSettings {
+struct NorthernLightsSettings {
     colours: [Colour; 3],
     band: [f64; 2],
     speeds: Vec<f64>,
@@ -150,15 +150,9 @@ struct AuroraSettings {
     rate: f64,
 }
 
-impl Validate for AuroraSettings {
+impl Validate for NorthernLightsSettings {
     fn validate(&self) -> Result<(), String> {
-        let [top, bottom] = self.band;
-        if !(0.0 <= top && top < bottom && bottom <= 1.0) {
-            return Err("band is [top, bottom], fractions of the picture's height, top first".into());
-        }
-        if bottom - top < 0.02 {
-            return Err("band is at least 0.02 of the picture's height".into());
-        }
+        band(self.band)?;
         within("rise", self.rise, 0.0, 0.5)?;
         within("shimmer", self.shimmer, 0.0, 1.0)?;
         within("glow", self.glow, 0.0, 1.0)?;
@@ -182,7 +176,7 @@ struct Curtain {
 }
 
 impl Sky {
-    fn new(s: AuroraSettings) -> Sky {
+    fn new(s: NorthernLightsSettings) -> Sky {
         Sky {
             colours: s.colours.iter().map(|c| c.rgb()).collect(),
             band: (s.band[0], s.band[1]),
@@ -378,14 +372,14 @@ impl Sky {
 
 /// Aurora curtains (live): layers of strips, each drifting at its own speed, rising, falling and
 /// brightening with slow waves. Updated `rate` times a second.
-pub struct Aurora {
+pub struct NorthernLights {
     sky: Rc<RefCell<Sky>>,
     at: f64,
 }
 
 const SKY: Key<Rc<RefCell<Sky>>> = Key::new("aurora:sky");
 
-impl Aurora {
+impl NorthernLights {
     /// Publishes the sky for the water; the first aurora in the scene wins.
     fn share(&self, s: &mut Shared) {
         if s.get(&SKY).is_none() {
@@ -394,7 +388,7 @@ impl Aurora {
     }
 }
 
-impl Part for Aurora {
+impl Part for NorthernLights {
     fn live(&self) -> bool {
         true
     }
@@ -785,7 +779,7 @@ stars = 420"##,
             make: |_, t, _g| Ok(vec![Box::new(settings::<ArcticSky>(t))]),
         },
         Kind {
-            name: "aurora",
+            name: "northern-lights",
             defaults: r##"colours = ["#7dffb8", "#2fd8c0", "#8a5cff"]
 band = [0.2, 0.7]
 speeds = [3.0, -1.8]
@@ -798,8 +792,8 @@ rise = 0.16
 shimmer = 0.25
 rate = 20"##,
             varies: &[],
-            check: check::<AuroraSettings>,
-            make: |_, t, _g| Ok(vec![Box::new(Aurora { sky: Rc::new(RefCell::new(Sky::new(settings(t)))), at: 0.0 })]),
+            check: check::<NorthernLightsSettings>,
+            make: |_, t, _g| Ok(vec![Box::new(NorthernLights { sky: Rc::new(RefCell::new(Sky::new(settings(t)))), at: 0.0 })]),
         },
         Kind {
             name: "ranges",

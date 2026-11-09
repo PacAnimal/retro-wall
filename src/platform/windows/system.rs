@@ -238,12 +238,6 @@ pub fn net_counts(only: &[String]) -> HashMap<String, (u64, u64)> {
     out
 }
 
-fn primary_address() -> Option<String> {
-    let s = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
-    s.connect("1.1.1.1:53").ok()?;
-    Some(s.local_addr().ok()?.ip().to_string())
-}
-
 /// The next hop of the route Windows takes out (to 1.1.1.1); none on a route without one (a tunnel).
 fn router() -> Option<String> {
     // SAFETY: zeroed SOCKADDR_INET and MIB_IPFORWARD_ROW2 are valid; the destination is a full IPv4
@@ -263,7 +257,7 @@ fn router() -> Option<String> {
 }
 
 pub fn addresses() -> (Option<String>, Option<String>) {
-    (primary_address(), router())
+    (crate::platform::primary_address(), router())
 }
 
 /// The DNS host name, without its domain.

@@ -6,7 +6,7 @@
 //! the still picture.
 
 use super::render::{Camera, HELD, PLANT, SUNS, V3, add, cross, dot, mul, norm, normal};
-use crate::util::Rgb;
+use crate::util::{Rgb, mixed};
 
 /// The day at a moment: where the sun and the moon are, how light it is (0 night, 1 day), how near
 /// the sun is to the horizon (1 on it), and the colours that follow.
@@ -37,10 +37,6 @@ const DUSK: Rgb = (1.0, 0.5, 0.22);
 /// The torches' light, at its brightest.
 const TORCH: Rgb = (1.3, 0.98, 0.6);
 
-fn mix(a: Rgb, b: Rgb, t: f64) -> Rgb {
-    (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t, a.2 + (b.2 - a.2) * t)
-}
-
 fn times(a: Rgb, b: Rgb) -> Rgb {
     (a.0 * b.0, a.1 * b.1, a.2 * b.2)
 }
@@ -65,21 +61,21 @@ impl Moment {
     pub fn at(f: f64, rise: f64, set: f64, cam: &Camera, top: Rgb, haze: Rgb) -> Moment {
         let (sun, moon, _, day, dusk) = crate::day::at(rise, set, f);
         let stars = (1.0 - day) * (1.0 - day);
-        let top = mix(NIGHT_TOP, top, day);
-        let haze = mix(mix(NIGHT_HAZE, haze, day), (0.98, 0.62, 0.42), dusk * 0.55);
+        let top = mixed(NIGHT_TOP, top, day);
+        let haze = mixed(mixed(NIGHT_HAZE, haze, day), (0.98, 0.62, 0.42), dusk * 0.55);
         // the sky's light from all about: cool, the shade's; the sun's warm, golden low down
-        let light = mix(times(NIGHT_LIGHT, (0.75, 0.75, 0.75)), (0.56, 0.61, 0.72), day);
+        let light = mixed(times(NIGHT_LIGHT, (0.75, 0.75, 0.75)), (0.56, 0.61, 0.72), day);
         let (sun_dir, moon_dir) = (arc(cam, sun), arc(cam, moon));
         let low = 1.0 - ((sun_dir[1] - 0.02) / 0.6).clamp(0.0, 1.0);
-        let light = mix(light, times(light, (1.0, 0.84, 0.74)), (dusk * 0.5).max(low * 0.4 * day));
+        let light = mixed(light, times(light, (1.0, 0.84, 0.74)), (dusk * 0.5).max(low * 0.4 * day));
         let up = |d: V3| ((d[1] + 0.02) / 0.14).clamp(0.0, 1.0);
         // golden as it sinks: the lower, the warmer
         let gold = 1.0 - ((sun_dir[1] - 0.02) / 0.6).clamp(0.0, 1.0);
         let k = up(sun_dir) * day.max(0.15);
-        let sunc = times(mix((0.68, 0.62, 0.5), (1.15, 0.62, 0.28), gold.powf(1.4)), (k, k, k));
+        let sunc = times(mixed((0.68, 0.62, 0.5), (1.15, 0.62, 0.28), gold.powf(1.4)), (k, k, k));
         let k = up(moon_dir) * (1.0 - day);
         let moonc = times((0.13, 0.15, 0.24), (k, k, k));
-        let cloud = mix(mix((0.1, 0.11, 0.17), (1.0, 1.0, 1.0), day), (1.0, 0.68, 0.52), dusk * 0.5 * day.max(0.3));
+        let cloud = mixed(mixed((0.1, 0.11, 0.17), (1.0, 1.0, 1.0), day), (1.0, 0.68, 0.52), dusk * 0.5 * day.max(0.3));
         Moment { sun: sun_dir, moon: moon_dir, day, dusk, top, haze, light, sunc, moonc, sun_at: sun, moon_at: moon, glow: DUSK, stars, cloud }
     }
 
@@ -111,13 +107,13 @@ fn square(d: V3, dir: V3, size: f64, glow: f64) -> (f64, f64) {
 /// The sky's colour along a ray, as `SKY` draws it.
 pub fn sky_at(m: &Moment, d: V3) -> Rgb {
     let e = d[1].max(0.0);
-    let mut out = mix(m.haze, m.top, (e * 2.4).min(1.0).powf(0.8));
+    let mut out = mixed(m.haze, m.top, (e * 2.4).min(1.0).powf(0.8));
     // the glow about the sun low down, along the horizon
     let flat = norm([d[0], 0.0, d[2]]);
     let sflat = norm([m.sun[0], 0.0, m.sun[2] + 1e-9]);
     let along = dot(flat, sflat).max(0.0);
     let g = m.dusk * along.powi(6) * (1.0 - (e / 0.45).min(1.0)).powi(2);
-    out = mix(out, m.glow, g * 0.85);
+    out = mixed(out, m.glow, g * 0.85);
     // the sun, above the horizon; the moon, pale, at night
     if m.sun[1] > -0.12 && d[1] > -0.03 {
         let (core, glow) = square(d, m.sun, 0.045, 0.08);
@@ -144,7 +140,7 @@ pub fn sky_at(m: &Moment, d: V3) -> Rgb {
 /// How lit the torches are by the daylight (0 night, 1 day): out by full day, lit through dusk, the
 /// night and dawn.
 pub fn lamps(day: f64) -> f64 {
-    1.0 - crate::util::smooth_ab(0.6, 0.97, day)
+    1.0 - crate::util::smoothstep(0.6, 0.97, day)
 }
 
 /// How bright a torch is at a pixel at a moment: a slight, slow waver, as a flame's. Its phase changes

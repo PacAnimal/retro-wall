@@ -3,6 +3,7 @@
 //! shows no change, so there retro-wall shows the still picture itself.
 
 use crate::platform::{Desktop, Screen};
+use crate::util::rgb;
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
@@ -26,12 +27,6 @@ pub struct Workspace;
 fn screens() -> Vec<(String, Retained<NSScreen>)> {
     let Some(mtm) = MainThreadMarker::new() else { return vec![] };
     NSScreen::screens(mtm).iter().map(|s| (s.localizedName().to_string(), s)).collect()
-}
-
-/// (red, green, blue), 0 to 1, of #rrggbb.
-fn rgb(colour: &str) -> (f64, f64, f64) {
-    let c = |i: usize| colour.get(i..i + 2).and_then(|h| u8::from_str_radix(h, 16).ok()).unwrap_or(0) as f64 / 255.0;
-    (c(1), c(3), c(5))
 }
 
 /// Set a screen's picture, with its scaling, clipping and fill colour.

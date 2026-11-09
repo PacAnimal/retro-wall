@@ -43,6 +43,20 @@ pub enum Anchor {
     Status,
 }
 
+impl Anchor {
+    /// Its name in a theme or `retro.toml`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Anchor::UnderTitle => "under-title",
+            Anchor::TopLeft => "top-left",
+            Anchor::TopRight => "top-right",
+            Anchor::BottomLeft => "bottom-left",
+            Anchor::BottomRight => "bottom-right",
+            Anchor::Status => "status",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Direction {
@@ -313,6 +327,23 @@ fn clean_value(v: &mut Value) {
     }
 }
 
+/// The theme format this retro-wall reads. A theme says which it was written for (`format = 1`); one
+/// without says nothing and is read as 1. Settings, kinds and roles may be added within a format; one
+/// that is renamed, removed or read in another way makes the next.
+pub const THEME_FORMAT: i64 = 1;
+
+/// A theme file's format, or why this retro-wall cannot read it.
+fn format_of(data: &Table) -> Result<i64, String> {
+    match data.get("format") {
+        None => Ok(1),
+        Some(Value::Integer(f)) if (1..=THEME_FORMAT).contains(f) => Ok(*f),
+        Some(Value::Integer(f)) if *f > THEME_FORMAT => {
+            Err(format!("format {f}: written for a newer retro-wall (this one reads format {THEME_FORMAT}); update retro-wall"))
+        }
+        Some(v) => Err(format!("format is {v}: it takes a whole number, {THEME_FORMAT}")),
+    }
+}
+
 /// A theme and every theme it extends, the furthest first. A theme it extends is looked for beside it
 /// first.
 fn load_chain(spec: &str, beside: Option<&Path>, seen: &mut Vec<PathBuf>) -> R<Vec<(PathBuf, Table)>> {
@@ -331,10 +362,11 @@ fn load_chain(spec: &str, beside: Option<&Path>, seen: &mut Vec<PathBuf>) -> R<V
         });
     }
     let data = read_toml(&path)?;
-    let known = ["name", "extends", "palette", "tweaks", "scene", "element", "day", "night", "group", "widget", "monitors"];
+    let known = ["format", "name", "extends", "palette", "tweaks", "scene", "element", "day", "night", "group", "widget", "monitors"];
     if let Some(k) = data.keys().find(|k| !known.contains(&k.as_str())) {
         return err(format!("{}: unknown {k} (a theme has {})", path.display(), known.join(", ")));
     }
+    format_of(&data).map_err(|e| ThemeError(format!("{}: {e}", path.display())))?;
     seen.push(path.clone());
     let mut chain = match data.get("extends") {
         Some(Value::String(parent)) => load_chain(parent, path.parent().and_then(Path::parent), seen)?,
@@ -1090,6 +1122,17 @@ mod tests {
         assert_eq!(t["label"].as_str(), Some("CPU"));
         let list = t["wx"]["list"].as_array().unwrap();
         assert_eq!((list[0].as_str(), list[1].as_integer(), list[2]["s"].as_str()), (Some("a"), Some(1), Some("b")));
+    }
+
+    #[test]
+    fn a_theme_says_its_format_or_is_read_as_the_first() {
+        let t = |s: &str| s.parse::<Table>().unwrap();
+        assert_eq!(format_of(&t("name = \"x\"")), Ok(1));
+        assert_eq!(format_of(&t("format = 1")), Ok(1));
+        assert!(format_of(&t(&format!("format = {}", THEME_FORMAT + 1))).unwrap_err().contains("newer retro-wall"));
+        for bad in ["format = 0", "format = -1", "format = \"1\"", "format = 1.0"] {
+            assert!(format_of(&t(bad)).is_err(), "{bad}");
+        }
     }
 
     #[test]

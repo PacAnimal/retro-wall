@@ -127,7 +127,8 @@ pub struct Textures {
     pub all: Vec<Texture>,
 }
 
-fn hex(h: u32) -> [f32; 3] {
+/// A colour written 0xrrggbb, as 0 to 1 RGB.
+pub(super) fn hex(h: u32) -> [f32; 3] {
     [((h >> 16) & 255) as f32 / 255.0, ((h >> 8) & 255) as f32 / 255.0, (h & 255) as f32 / 255.0]
 }
 

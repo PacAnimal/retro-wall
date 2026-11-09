@@ -5,6 +5,7 @@
 # the island's colours; the instruments stand unframed and shadowed at the top left, clear of the volcano
 # and the town; the graph runs along the bottom, in the ocean's colours.
 #
+format = 1                  # the theme format it is written for: EXTENDING.md, "What stays stable"
 name = "Guybrush"
 
 scene = ["sky", "clouds", "waves", "smoke", "island", "mountains", "title", "instruments", "finish"]

@@ -7,6 +7,7 @@
 # No code of its own: a painting, the moving parts laid over it, and the pipe in front of them. Every
 # part names its reading as `source`: set another (yours too, `retro-wall --list`), or "" for the
 # part's own idle motion. Places and sizes are in the pixels of a 3840 x 2160 canvas.
+format = 1                  # the theme format it is written for: EXTENDING.md, "What stays stable"
 name = "Copperworks"
 
 scene = ["plate", "tanks-teal", "tanks-violet", "gears", "gauges", "pipe", "lamps", "vents", "title", "instruments", "finish"]

@@ -1,21 +1,21 @@
 //! The element kinds a scene is made of. A kind declares its settings (TOML defaults), checks them into
 //! a typed struct, and builds its parts for a monitor. A theme names it: `[element.NAME] type = "KIND"`.
 
-pub mod aurora;
-pub mod blocky;
+pub mod arctic;
+pub mod blocks;
+pub mod city;
+pub mod code_rain;
 pub mod core;
-pub mod forest;
-pub mod guybrush;
 pub mod instruments;
+pub mod island;
 pub mod machine;
-pub mod matrix;
 pub mod mountains;
-pub mod night_city;
 pub mod painted;
-pub mod phosphor;
-pub mod racing;
+pub mod road;
 pub mod shader;
-pub mod winter;
+pub mod snowfield;
+pub mod synthwave;
+pub mod woodland;
 pub mod woods;
 
 use crate::config::{KindInfo, Theme};
@@ -68,32 +68,64 @@ pub fn each(name: &str, vs: &[f64], lo: f64, hi: f64) -> Result<(), String> {
     vs.iter().try_for_each(|&v| within(name, v, lo, hi))
 }
 
+/// A `band` setting: [top, bottom], fractions of the picture's height, top first, at least 0.02 apart.
+pub fn band(v: [f64; 2]) -> Result<(), String> {
+    let [top, bottom] = v;
+    if !(0.0 <= top && top < bottom && bottom <= 1.0) {
+        return Err("band is [top, bottom], fractions of the picture's height, top first".into());
+    }
+    if bottom - top < 0.02 {
+        return Err("band is at least 0.02 of the picture's height".into());
+    }
+    Ok(())
+}
+
+/// A setting naming a picture of the theme's: it must name one.
+pub fn named(name: &str, v: &str) -> Result<(), String> {
+    if v.is_empty() { Err(format!("{name}: it names a picture of the theme's")) } else { Ok(()) }
+}
+
 /// A setting that must lie in [lo, hi].
 pub fn within(name: &str, v: f64, lo: f64, hi: f64) -> Result<(), String> {
     if (lo..=hi).contains(&v) { Ok(()) } else { Err(format!("{name} is {}: it is {} to {}", crate::util::num(v), crate::util::num(lo), crate::util::num(hi))) }
 }
 
+/// A module of element kinds: its kinds, and what it lets go of once a scene is built (caches its
+/// parts kept only while the scene was made). A new module is one line in `MODULES`.
+struct Module {
+    kinds: fn() -> Vec<Kind>,
+    built: Option<fn()>,
+}
+
+const fn module(kinds: fn() -> Vec<Kind>) -> Module {
+    Module { kinds, built: None }
+}
+
+const MODULES: &[Module] = &[
+    module(core::kinds),
+    module(painted::kinds),
+    module(machine::kinds),
+    module(synthwave::kinds),
+    module(city::kinds),
+    module(mountains::kinds),
+    module(instruments::kinds),
+    module(shader::kinds),
+    module(arctic::kinds),
+    Module { kinds: island::kinds, built: Some(island::built) },
+    module(snowfield::kinds),
+    module(code_rain::kinds),
+    module(road::kinds),
+    module(woodland::kinds),
+    module(blocks::kinds),
+];
+
 /// Every element kind, with its defaults parsed.
 fn registry() -> &'static [(Kind, Table)] {
     static ALL: OnceLock<Vec<(Kind, Table)>> = OnceLock::new();
     ALL.get_or_init(|| {
-        let mut v = vec![];
-        v.extend(core::kinds());
-        v.extend(painted::kinds());
-        v.extend(machine::kinds());
-        v.extend(phosphor::kinds());
-        v.extend(night_city::kinds());
-        v.extend(mountains::kinds());
-        v.extend(instruments::kinds());
-        v.extend(shader::kinds());
-        v.extend(aurora::kinds());
-        v.extend(guybrush::kinds());
-        v.extend(winter::kinds());
-        v.extend(matrix::kinds());
-        v.extend(racing::kinds());
-        v.extend(forest::kinds());
-        v.extend(blocky::kinds());
-        v.into_iter()
+        MODULES
+            .iter()
+            .flat_map(|m| (m.kinds)())
             .map(|k| {
                 let defaults = k.defaults.parse::<Table>().unwrap_or_else(|e| unreachable!("kind {}'s defaults: {e}", k.name));
                 (k, defaults)
@@ -119,7 +151,7 @@ pub fn kind_info(name: &str) -> Option<KindInfo> {
 
 /// A scene is built: what its elements kept only while building it is let go.
 pub fn built() {
-    guybrush::built();
+    MODULES.iter().filter_map(|m| m.built).for_each(|f| f());
 }
 
 /// The scene's parts for a monitor, bottom to top: the header's parts only where it shows them. An

@@ -8,10 +8,11 @@
 # out of their burrows, leaves fall and dust glints in the light. The pictures are beside this file: the ground,
 # path and river bed textures (seamless, seen from above) and the things in sprites/, each standing on
 # its foot at the bottom; trees of one species share the start of their names (oak1, oak-ancient).
-# [element.forest].seed = N keeps one forest.
+# [element.woodland].seed = N keeps one forest.
+format = 1                  # the theme format it is written for: EXTENDING.md, "What stays stable"
 name = "Forest"
 
-scene = ["forest", "title", "instruments"]
+scene = ["woodland", "title", "instruments"]
 
 [monitors]                  # a pure wallpaper: nothing over the scene. title = "rightmost" in retro.toml
 title = "none"              # shows the hostname, in the lettering below
@@ -38,8 +39,7 @@ title_shadow = [4.0, 6.0, 4.0, 1.4, "#0a0e04"]
 rule = false
 ruler_end = 0.0
 
-[element.forest]
-type = "forest"
+[element.woodland]
 density = 35.0              # trees per square unit where the wood is thickest
 brightness = 0.85           # every picture a little darker and duller than painted
 saturation = 0.85

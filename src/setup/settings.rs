@@ -11,7 +11,7 @@
 //! Each is changed only where the settings say: other lines, keys, comments and options it does not
 //! know are kept as they were.
 
-use crate::config::{Anchor, Direction, Group};
+use crate::config::{Direction, Group};
 use std::path::Path;
 use toml_edit::{Array, ArrayOfTables, DocumentMut, Item, Table, value};
 
@@ -425,7 +425,7 @@ impl Settings {
             let text = std::fs::read_to_string(dir.join("themes").join(&own).join("theme.toml")).unwrap_or_default();
             let t: DocumentMut = text.parse().unwrap_or_default();
             s.theme = t.get("extends").and_then(Item::as_str).map(String::from).or(Some(own.trim_start_matches(OWN_THEME).to_string()));
-            let world = t.get("element").and_then(|e| e.get("world"));
+            let world = t.get("element").and_then(|e| e.get(crate::elements::blocks::KIND));
             s.ui = world.and_then(|w| w.get("ui")).and_then(Item::as_bool);
             s.hand = world.and_then(|w| w.get("hand")).and_then(Item::as_bool);
         }
@@ -459,7 +459,7 @@ impl Settings {
             t["extends"] = value(theme.as_str());
             let mut element = Table::new();
             element.set_implicit(true);
-            element["world"] = Item::Table(world);
+            element[crate::elements::blocks::KIND] = Item::Table(world);
             t["element"] = Item::Table(element);
             let head = "# Written by retro-wall's setup program: the theme it extends, with your settings. Change them there.\n";
             std::fs::create_dir_all(&own_dir).map_err(|e| format!("{}: {e}", own_dir.display()))?;
@@ -516,7 +516,7 @@ impl Settings {
                     continue;
                 }
                 let mut t = Table::new();
-                t["anchor"] = value(anchor_name(g.anchor));
+                t["anchor"] = value(g.anchor.name());
                 if g.direction == Direction::Column {
                     t["direction"] = value("column");
                 }
@@ -637,17 +637,6 @@ fn with_conf_line(conf: &str, args: &[String]) -> String {
         out.push(line);
     }
     out.join("\n") + "\n"
-}
-
-fn anchor_name(a: Anchor) -> &'static str {
-    match a {
-        Anchor::UnderTitle => "under-title",
-        Anchor::TopLeft => "top-left",
-        Anchor::TopRight => "top-right",
-        Anchor::BottomLeft => "bottom-left",
-        Anchor::BottomRight => "bottom-right",
-        Anchor::Status => "status",
-    }
 }
 
 /// Write a file whole: to a temporary beside it, on the disk, then renamed over it, so a reader never

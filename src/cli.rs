@@ -260,6 +260,7 @@ const THEME: &str = r###"# NAME: a theme of your own. It starts as a copy of BAS
 #           retro-wall --snapshot /tmp/NAME.png --theme NAME       (the live parts too)
 # Use it:   theme = "NAME" in ~/.config/retro/retro.toml, or retro-wall --theme NAME
 # What can be set: retro-wall --settings NAME
+format = 1                  # the theme format it is written for: EXTENDING.md, "What stays stable"
 name = "NAME"
 extends = "BASE"
 # The scene, bottom to top: BASE's, unless you name your own (retro-wall --settings BASE shows BASE's).

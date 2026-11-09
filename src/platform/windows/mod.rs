@@ -6,8 +6,7 @@ pub mod display;
 pub mod font;
 pub mod system;
 
-use crate::platform::{Desktop, Power};
-use std::collections::HashMap;
+use crate::platform::Desktop;
 use std::path::{Path, PathBuf};
 
 pub struct Windows;
@@ -19,41 +18,7 @@ impl crate::platform::Platform for Windows {
         display::Win::open()
     }
 
-    fn power() -> Power {
-        system::power()
-    }
-
-    fn port_connected(port: u16) -> bool {
-        system::port_connected(port)
-    }
-
-    fn cpu_times() -> Option<(u64, u64)> {
-        system::cpu_times()
-    }
-
-    fn memory() -> Option<(f64, f64)> {
-        system::memory()
-    }
-
-    fn disk_ios() -> u64 {
-        system::disk_ios()
-    }
-
-    fn drive_space(path: &str) -> Option<(f64, f64)> {
-        system::drive_space(path)
-    }
-
-    fn net_counts(only: &[String]) -> HashMap<String, (u64, u64)> {
-        system::net_counts(only)
-    }
-
-    fn addresses() -> (Option<String>, Option<String>) {
-        system::addresses()
-    }
-
-    fn hostname() -> String {
-        system::hostname()
-    }
+    crate::platform::readings_from_system!();
 
     fn desktop() -> Option<Box<dyn Desktop>> {
         Some(Box::new(desktop::Wallpaper))

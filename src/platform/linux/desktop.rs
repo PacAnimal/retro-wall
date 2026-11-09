@@ -9,6 +9,7 @@
 //! | KDE Plasma | each desktop's wallpaper plugin and picture settings | qdbus or dbus-send |
 
 use crate::platform::{Desktop, Screen};
+use crate::util::rgb;
 use std::collections::HashSet;
 use std::process::{Command, Stdio};
 
@@ -74,12 +75,6 @@ fn must(cmd: &[&str]) -> Result<String, String> {
 
 fn found(program: &str) -> bool {
     std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(program).is_file()))
-}
-
-/// (red, green, blue), 0 to 1, of #rrggbb.
-fn rgb(colour: &str) -> (f64, f64, f64) {
-    let c = |i: usize| colour.get(i..i + 2).and_then(|h| u8::from_str_radix(h, 16).ok()).unwrap_or(0) as f64 / 255.0;
-    (c(1), c(3), c(5))
 }
 
 // --- XFCE -----------------------------------------------------------------------------------------

@@ -6,7 +6,7 @@
 //!
 //! Everything moves as a function of the scene's clock, so a frame is the same however it was come to.
 
-use super::forest::{DOWN, Line, STAND, Settings, Sort, Sprite, Stand, UP, draw, shadow, shadow_at, spot};
+use super::woodland::{DOWN, Line, STAND, Settings, Sort, Sprite, Stand, UP, draw, shadow, shadow_at, spot};
 use crate::gfx::{Blend, Gfx, Kind, Tex, Uploads};
 use crate::rng::Rng;
 use crate::scene::*;
@@ -228,7 +228,7 @@ fn critter(g: &Geo, atlas: &mut Atlas, name: &str, height: f64, grade: (f64, f64
         return None;
     }
     let mut s = Sprite::load(g.th.path(name));
-    super::forest::graded(&mut s.pic, grade.0, grade.1);
+    super::woodland::graded(&mut s.pic, grade.0, grade.1);
     let k = height / s.size.1.max(1.0);
     Some((packed(atlas, &s.pic, k), (s.size.0 * k, height)))
 }
@@ -258,7 +258,7 @@ fn turning(g: &Geo, atlas: &mut Atlas, name: &str, poses: i32, side: f64, anchor
         return None;
     }
     let mut sheet = load_png(g.th.path(name));
-    super::forest::graded(&mut sheet, grade.0, grade.1);
+    super::woodland::graded(&mut sheet, grade.0, grade.1);
     let f = sheet.height() / poses;
     let n = (sheet.width() / f.max(1)) as usize;
     if f < 1 || n < 1 {
@@ -399,7 +399,7 @@ impl Part for Woods {
     }
     fn textures(&mut self, g: &Geo, s: &Shared, up: &mut Uploads) {
         let Some(stand) = s.get::<Stand>(&STAND) else { return };
-        let u = super::forest::unit_on(g);
+        let u = super::woodland::unit_on(g);
         self.u = u;
         let mut atlas = Atlas::default();
         // each picture once, at the largest it is drawn
@@ -623,7 +623,7 @@ impl Woods {
             }
         };
         if let Some(duck) = &self.pics.duck {
-            let count = (self.river_length() / (u * 0.9)).round().clamp(1.0, (3.0 * super::forest::more(w, h, u)).round()) as usize;
+            let count = (self.river_length() / (u * 0.9)).round().clamp(1.0, (3.0 * super::woodland::more(w, h, u)).round()) as usize;
             // each round its own stretch of the river, so that no two swim through each other
             let mut taken: Vec<(f64, f64)> = vec![];
             for i in 0..count {
@@ -761,7 +761,7 @@ impl Woods {
             return;
         }
         let (u, t) = (self.u, self.t);
-        for i in 0..(12.0 * super::forest::more(w, h, u)).round() as i64 {
+        for i in 0..(12.0 * super::woodland::more(w, h, u)).round() as i64 {
             let every = 6.0 + (i % 4) as f64;
             let tt = t + i as f64 * 1.37;
             let cycle = (tt / every).floor() as i64;
@@ -831,7 +831,7 @@ impl Woods {
     /// Dust drifting in the light, glinting.
     fn motes(&self, b: &mut Batch, gfx: &mut Gfx, pages: &[Tex], w: f64, h: f64) {
         let (u, t) = (self.u, self.t);
-        for i in 0..(36.0 * super::forest::more(w, h, u)).round() as i64 {
+        for i in 0..(36.0 * super::woodland::more(w, h, u)).round() as i64 {
             let (ax, ay) = (hashed(&[self.seed, i, 7]) * w, hashed(&[self.seed, i, 8]) * h);
             let ph = hashed(&[self.seed, i, 9]) * TAU;
             let (x, y) = (ax + u * 0.03 * (t * 0.13 + ph).sin(), ay + u * 0.02 * (t * 0.17 + ph * 1.3).sin() - (t * u * 0.002) % (u * 0.05));

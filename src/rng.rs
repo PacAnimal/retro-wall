@@ -17,6 +17,14 @@ pub fn run_seed(set: i64) -> i64 {
     })
 }
 
+/// A point of a lattice as 32 random-looking bits: the same for the same point on every start.
+pub fn lattice(x: i32, y: i32, z: i32) -> u32 {
+    let mut h = (x as u32).wrapping_mul(0x8da6_b343) ^ (y as u32).wrapping_mul(0xd816_3841) ^ (z as u32).wrapping_mul(0xcb1a_b31f);
+    h ^= h >> 13;
+    h = h.wrapping_mul(0x5bd1_e995);
+    h ^ (h >> 15)
+}
+
 pub struct Rng {
     s: [u64; 4],
     spare: Option<f64>,
@@ -24,10 +32,24 @@ pub struct Rng {
 
 fn splitmix(x: &mut u64) -> u64 {
     *x = x.wrapping_add(0x9e37_79b9_7f4a_7c15);
-    let mut z = *x;
+    mix64(*x)
+}
+
+/// SplitMix64's finalizer: every bit of `z` stirred into every bit of the result.
+fn mix64(mut z: u64) -> u64 {
     z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
     z ^ (z >> 31)
+}
+
+/// A number in [0, 1) from any 64 bits, well stirred: the same on every start and every machine.
+pub fn unit(bits: u64) -> f64 {
+    (mix64(bits) >> 11) as f64 / (1u64 << 53) as f64
+}
+
+/// A number in [0, 1) for a key under a seed and a salt (each use its own salt).
+pub fn keyed(seed: i64, k: i64, salt: u64) -> f64 {
+    unit((seed as u64) ^ (k as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ salt.wrapping_mul(0xd1b5_4a32_d192_ed03))
 }
 
 impl Rng {

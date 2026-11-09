@@ -19,6 +19,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+/// The plugin protocol this retro-wall speaks: in every face request (`"protocol"`) and in each plugin's
+/// environment (`RETRO_PROTOCOL`). Fields and operations may be added within a protocol, so a plugin
+/// leaves out what it does not know; one renamed, removed or read in another way makes the next.
+pub const PROTOCOL: u32 = 1;
+
 pub fn sources_dir() -> PathBuf {
     crate::config::config_dir().join("sources")
 }
@@ -228,8 +233,8 @@ fn mark_stale(readings: &Mutex<HashMap<String, Reading>>, name: &str) {
 /// A plugin in a process group of its own, so that what it starts is stopped with it. On Windows,
 /// without a console window (retro-wall has none to lend it); its job object is made in `spawn`.
 fn command(program: impl AsRef<std::ffi::OsStr>) -> Command {
-    #[allow(unused_mut)]
     let mut c = Command::new(program);
+    c.env("RETRO_PROTOCOL", PROTOCOL.to_string());
     #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(&mut c, 0);
     #[cfg(windows)]
@@ -540,7 +545,7 @@ impl FaceLook {
 
 /// What a face is asked: the picture's size, what it shows, and the theme's colours.
 pub fn face_request(look: &FaceLook, w: i32, h: i32, scale: f64, r: &Reading, settings: &toml::Table) -> J {
-    json!({"width": w, "height": h, "scale": scale, "value": r.value, "indicator": r.indicator, "text": r.text.as_deref(),
+    json!({"protocol": PROTOCOL, "width": w, "height": h, "scale": scale, "value": r.value, "indicator": r.indicator, "text": r.text.as_deref(),
         "stale": r.stale, "settings": serde_json::to_value(settings).unwrap_or(J::Null), "palette": look.palette, "colours": look.colours})
 }
 

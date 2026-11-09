@@ -5,6 +5,7 @@
 #
 # It is the scene that makes it a city; the palette colours what every theme has: the instruments, the
 # lettering, the mountains.
+format = 1                  # the theme format it is written for: EXTENDING.md, "What stays stable"
 name = "Night city"
 
 scene = ["sky", "moon", "skyline-far", "skyline-mid", "skyline-near", "street", "windows", "reflections", "shore",

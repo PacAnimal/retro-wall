@@ -249,17 +249,7 @@ pub fn disk_ios() -> u64 {
     total
 }
 
-pub fn drive_space(path: &str) -> Option<(f64, f64)> {
-    let c = std::ffi::CString::new(path).ok()?;
-    // SAFETY: plain integers; zero is a valid value of each.
-    let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
-    // SAFETY: a NUL-terminated path and a statvfs to fill.
-    if unsafe { libc::statvfs(c.as_ptr(), &mut st) } != 0 || st.f_blocks == 0 {
-        return None;
-    }
-    let (total, free) = (st.f_blocks as f64 * st.f_frsize as f64, st.f_bavail as f64 * st.f_frsize as f64);
-    Some((100.0 * (total - free) / total, 100.0 * free / total))
-}
+pub use crate::platform::unix::drive_space;
 
 /// An interface's 64-bit counters (if_data64), from its IFMIB_IFDATA sysctl: (type, received, sent).
 fn interface_data(index: u32) -> Option<(u8, u64, u64)> {
@@ -306,12 +296,6 @@ pub fn net_counts(only: &[String]) -> HashMap<String, (u64, u64)> {
         libc::if_freenameindex(list);
     }
     out
-}
-
-fn primary_address() -> Option<String> {
-    let s = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
-    s.connect("1.1.1.1:53").ok()?;
-    Some(s.local_addr().ok()?.ip().to_string())
 }
 
 /// The IPv4 default routes in a routing-table dump (NET_RT_FLAGS): rt_msghdr records, each followed by
@@ -364,7 +348,7 @@ pub fn default_routes(t: &[u8]) -> Vec<Route> {
 
 pub fn addresses() -> (Option<String>, Option<String>) {
     let table = sysctl_mib(&mut [libc::CTL_NET, libc::PF_ROUTE, 0, libc::AF_INET, libc::NET_RT_FLAGS, libc::RTF_UP]);
-    (primary_address(), table.and_then(|t| crate::platform::gateway(&default_routes(&t))))
+    (crate::platform::primary_address(), table.and_then(|t| crate::platform::gateway(&default_routes(&t))))
 }
 
 pub fn hostname() -> String {

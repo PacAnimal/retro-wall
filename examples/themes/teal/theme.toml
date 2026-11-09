@@ -3,6 +3,7 @@
 #
 #   cp -r teal ~/.config/retro/themes/        then  retro-wall --theme teal
 #   retro-wall --preview /tmp/teal.png 1920x1080 --theme ./teal      to look at it first
+format = 1                  # the theme format it is written for: EXTENDING.md, "What stays stable"
 name = "Teal"
 extends = "phosphor"
 

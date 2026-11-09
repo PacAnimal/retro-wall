@@ -9,10 +9,7 @@ use super::sky::Moment;
 pub type Square = (f64, f64, f64, f64, f64);
 
 fn hash(k: usize, salt: u64) -> f64 {
-    let mut h = (k as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ salt.wrapping_mul(0xd1b5_4a32_d192_ed03);
-    h = (h ^ (h >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    h ^= h >> 31;
-    (h >> 11) as f64 / (1u64 << 53) as f64
+    crate::rng::keyed(0, k as i64, salt)
 }
 
 /// A square `size` blocks across about a point of the world, on whole pixels; None off the screen.

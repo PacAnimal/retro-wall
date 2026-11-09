@@ -118,11 +118,6 @@ pub fn tz_offset_until(d: &[u8], now: i64) -> Option<(i64, i64)> {
     Some((be(types.checked_add(which.checked_mul(6)?)?)?, next))
 }
 
-fn smooth(a: f64, b: f64, x: f64) -> f64 {
-    let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
-}
-
 /// At fraction f of the day, with rise and set in hours: (sun, moon, elevation, light, dusk).
 pub fn at(rise: f64, set: f64, f: f64) -> (f64, f64, f64, f64, f64) {
     let h = f.rem_euclid(1.0) * 24.0;
@@ -130,7 +125,7 @@ pub fn at(rise: f64, set: f64, f: f64) -> (f64, f64, f64, f64, f64) {
     let sun = (h - rise) / day;
     let moon = ((h - set + 2.0).rem_euclid(24.0) - 2.0) / (24.0 - day);
     let elevation = if (0.0..=1.0).contains(&sun) { (std::f64::consts::PI * sun).sin() } else { -(std::f64::consts::PI * moon.clamp(0.0, 1.0)).sin() };
-    (sun, moon, elevation, smooth(-0.1, 0.22, elevation), (-(elevation / 0.13).powi(2)).exp())
+    (sun, moon, elevation, crate::util::smoothstep(-0.1, 0.22, elevation), (-(elevation / 0.13).powi(2)).exp())
 }
 
 /// "day" or "night" by the sun now, for a theme with looks; None for one without.

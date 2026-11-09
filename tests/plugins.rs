@@ -233,3 +233,12 @@ fn the_new_examples_work() {
         None => false,
     }));
 }
+
+#[test]
+fn a_plugin_is_told_the_protocol() {
+    let (_dir, r, _on) = source("protocol", "echo $((RETRO_PROTOCOL * 10))", 0.2);
+    let want = f64::from(plugins::PROTOCOL * 10);
+    assert!(eventually(5.0, || reading(&r, "protocol").is_some_and(|x| x.value == want && !x.stale)), "RETRO_PROTOCOL not in the environment");
+    let req = plugins::face_request(&look(), 10, 10, 1.0, &Reading::default(), &toml::Table::new());
+    assert_eq!(req["protocol"], json!(plugins::PROTOCOL));
+}

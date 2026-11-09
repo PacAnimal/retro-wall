@@ -12,17 +12,6 @@ fn overlaps(a: Rect, b: Rect) -> bool {
     a.0 < b.2 && b.0 < a.2 && a.1 < b.3 && b.1 < a.3
 }
 
-fn anchor_name(a: Anchor) -> &'static str {
-    match a {
-        Anchor::UnderTitle => "under-title",
-        Anchor::TopLeft => "top-left",
-        Anchor::TopRight => "top-right",
-        Anchor::BottomLeft => "bottom-left",
-        Anchor::BottomRight => "bottom-right",
-        Anchor::Status => "status",
-    }
-}
-
 /// Each widget's area by name, on whole pixels. Groups too wide are scaled down; groups that would
 /// overlap the hostname or an earlier group are moved clear. The status line places itself.
 pub fn layout(g: &Geo, groups: &[Group], sizes: &HashMap<String, (i32, i32)>) -> HashMap<String, Area> {
@@ -98,7 +87,7 @@ pub fn layout(g: &Geo, groups: &[Group], sizes: &HashMap<String, (i32, i32)>) ->
                 };
             }
             if t < 0.0 || t + span_h > height as f64 {
-                crate::errln!("layout: the {} group does not fit on a {width}x{height} screen", anchor_name(anchor));
+                crate::errln!("layout: the {} group does not fit on a {width}x{height} screen", anchor.name());
             }
             top = t;
         }

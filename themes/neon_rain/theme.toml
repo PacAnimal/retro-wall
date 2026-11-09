@@ -6,6 +6,7 @@
 # No code of its own: a painting and its patches, placed in [element] tables. Its pictures are beside
 # this file: the painting with its lights off and its TV dark, each light to lay over it, the
 # broadcasts, and the window's glass.
+format = 1                  # the theme format it is written for: EXTENDING.md, "What stays stable"
 name = "Neon rain"
 extends = "night_city"
 

@@ -611,7 +611,7 @@ fn has_world(theme: &str) -> bool {
     [install_dir().join("themes").join(theme), settings_dir().join("themes").join(theme)]
         .iter()
         .find_map(|d| std::fs::read_to_string(d.join("theme.toml")).ok())
-        .is_some_and(|t| t.contains("type = \"blocky\""))
+        .is_some_and(|t| retro_wall::elements::blocks::in_theme(&t))
 }
 
 /// The settings as they can be kept: blocky's extras only for a theme that has its world (a theme of

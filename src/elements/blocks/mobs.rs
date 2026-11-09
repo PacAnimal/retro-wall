@@ -2,6 +2,7 @@
 //! standing where the farm puts them and turned about their feet. Their faces are pixel art; their
 //! coats a texel's noise, a cow's patches, a cat's stripes.
 
+use super::textures::hex;
 use super::world::{AIR, MOB, RAIL, RAIL_Z, Shape, WATER, World, block};
 use crate::trace::rig::{Hinge, Pose, RigHit};
 use std::collections::HashMap;
@@ -182,17 +183,6 @@ fn model(kind: Kind) -> &'static [Part] {
         Kind::Villager => VILLAGER,
         Kind::Farmer => FARMER,
     }
-}
-
-fn rgb(h: u32) -> [f32; 3] {
-    [((h >> 16) & 255) as f32 / 255.0, ((h >> 8) & 255) as f32 / 255.0, (h & 255) as f32 / 255.0]
-}
-
-fn hash(a: i32, b: i32, c: i32) -> u32 {
-    let mut h = (a as u32).wrapping_mul(0x8da6_b343) ^ (b as u32).wrapping_mul(0xd816_3841) ^ (c as u32).wrapping_mul(0xcb1a_b31f);
-    h ^= h >> 13;
-    h = h.wrapping_mul(0x5bd1_e995);
-    h ^ (h >> 15)
 }
 
 struct Mob {
@@ -391,18 +381,18 @@ fn paint(p: &Part, pi: usize, axis: usize, sign: f64, at: [f64; 3]) -> [f32; 3] 
         _ => (at[0], at[1]),
     };
     let (tu, tv) = (u.floor() as i32, v.floor() as i32);
-    let noise = hash(pi as i32 * 7 + axis as i32 * 2 + (sign > 0.0) as i32, tu, tv);
-    let fur = |a: u32, b: u32| rgb(if noise.is_multiple_of(4) { b } else { a });
+    let noise = crate::rng::lattice(pi as i32 * 7 + axis as i32 * 2 + (sign > 0.0) as i32, tu, tv);
+    let fur = |a: u32, b: u32| hex(if noise.is_multiple_of(4) { b } else { a });
     match p.coat {
         Coat::Fur(a, b) => fur(a, b),
         Coat::Patches(a, b) => {
             // patches a few texels across, the same wherever on the mob they fall
             let (px, py, pz) = ((at[0] / 4.0).floor() as i32, (at[1] / 4.0).floor() as i32, (at[2] / 4.0).floor() as i32);
-            if hash(px, py, pz).is_multiple_of(3) { rgb(b) } else { fur(a, a) }
+            if crate::rng::lattice(px, py, pz).is_multiple_of(3) { hex(b) } else { fur(a, a) }
         }
         Coat::Stripes(a, b) => {
             if (at[2].floor() as i32).rem_euclid(3) == 0 {
-                rgb(b)
+                hex(b)
             } else {
                 fur(a, a)
             }
@@ -415,7 +405,7 @@ fn paint(p: &Part, pi: usize, axis: usize, sign: f64, at: [f64; 3]) -> [f32; 3] 
                 if let Some(ch) = rows.get(row).and_then(|r| r.chars().nth(col))
                     && let Some(&(_, c)) = palette.iter().find(|q| q.0 == ch)
                 {
-                    return rgb(c);
+                    return hex(c);
                 }
             }
             fur(a, b)

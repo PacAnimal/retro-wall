@@ -343,7 +343,7 @@ fn themes(dirs: &[PathBuf]) -> Vec<ThemeItem> {
         }
         let Ok(text) = std::fs::read_to_string(e.path().join("theme.toml")) else { continue };
         let shown = text.lines().find_map(|l| l.strip_prefix("name = \"").and_then(|r| r.strip_suffix('"')).map(String::from)).unwrap_or_else(|| name.clone());
-        out.push(ThemeItem { about: about(&text), extras: text.contains("type = \"blocky\""), name, shown });
+        out.push(ThemeItem { about: about(&text), extras: retro_wall::elements::blocks::in_theme(&text), name, shown });
     }
     out.sort_by_key(|t| (t.name != "phosphor", t.shown.to_lowercase()));
     if let Some(p) = out.iter_mut().find(|t| t.name == "phosphor") {

@@ -233,6 +233,16 @@ pub fn smooth(x: f64) -> f64 {
     x * x * (3.0 - 2.0 * x)
 }
 
+/// A quad's outline as the path: its corners in order.
+pub fn quad_path(c: &Context, corners: [(f64, f64); 4]) {
+    let [(x0, y0), rest @ ..] = corners;
+    c.move_to(x0, y0);
+    for (x, y) in rest {
+        c.line_to(x, y);
+    }
+    c.close_path();
+}
+
 /// A surface's pixels, read in place: stride x height bytes, flushed. None while anything else holds
 /// the surface (a context, a pattern, another handle), so nothing can draw on it while they are read.
 pub fn view(s: &mut ImageSurface) -> Option<cairo::ImageSurfaceData<'_>> {
@@ -314,11 +324,7 @@ pub fn paint_vertices(c: &Context, s: &ImageSurface, data: &[f32]) {
         }
         let _ = c.save();
         if (u0, v0, du, dv) != (0.0, 0.0, 1.0, 1.0) {
-            c.move_to(x0, y0);
-            c.line_to(x1, y1);
-            c.line_to(x2, y2);
-            c.line_to(x3, y3);
-            c.close_path();
+            quad_path(c, [(x0, y0), (x1, y1), (x2, y2), (x3, y3)]);
             c.clip();
         }
         let (xx, yx, xy, yy) = ((x1 - x0) / (du * w), (y1 - y0) / (du * w), (x3 - x0) / (dv * h), (y3 - y0) / (dv * h));
@@ -357,19 +363,30 @@ pub fn traced(trace: impl FnOnce(&Context)) -> (f64, f64, f64, f64) {
 /// The pixels a span from a to b covers, as (first, last + 1, coverage). Partly covered pixels
 /// are split off, so edges between pixels are antialiased.
 pub fn spans(a: f64, b: f64) -> Vec<(f64, f64, f64)> {
+    let mut out = vec![];
+    each_span(a, b, |x0, x1, cover| out.push((x0, x1, cover)));
+    out
+}
+
+/// The pixels a span from a to b covers, as `spans` gives them, one at a time, without a list.
+pub fn each_span(a: f64, b: f64, mut f: impl FnMut(f64, f64, f64)) {
     let (fa, fb) = (a.floor(), b.floor());
     if fa == fb {
-        return if b > a { vec![(fa, fa + 1.0, b - a)] } else { vec![] };
+        if b > a {
+            f(fa, fa + 1.0, b - a);
+        }
+        return;
     }
-    let mut out = if a > fa { vec![(fa, fa + 1.0, fa + 1.0 - a)] } else { vec![] };
+    if a > fa {
+        f(fa, fa + 1.0, fa + 1.0 - a);
+    }
     let start = if a > fa { fa + 1.0 } else { fa };
     if fb > start {
-        out.push((start, fb, 1.0));
+        f(start, fb, 1.0);
     }
     if b > fb {
-        out.push((fb, fb + 1.0, b - fb));
+        f(fb, fb + 1.0, b - fb);
     }
-    out
 }
 
 /// A rectangle with antialiased edges at `alpha`, as pixel-aligned pieces (x0, y0, x1, y1, alpha).
@@ -679,7 +696,7 @@ pub fn settle_fonts() {
 }
 
 /// Smoothstep: 0 below a, 1 above b.
-pub fn smooth_ab(a: f64, b: f64, x: f64) -> f64 {
+pub fn smoothstep(a: f64, b: f64, x: f64) -> f64 {
     let t = 1.0f64.min(0.0f64.max((x - a) / (b - a)));
     t * t * (3.0 - 2.0 * t)
 }

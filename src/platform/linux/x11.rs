@@ -667,11 +667,7 @@ impl crate::platform::Display for X {
     }
 
     fn renderer(&self) -> String {
-        // SAFETY: a GL context is current; GetString gives null or a NUL-terminated string the driver keeps.
-        unsafe {
-            let p = gl::GetString(gl::RENDERER);
-            if p.is_null() { String::new() } else { CStr::from_ptr(p as *const _).to_string_lossy().into_owned() }
-        }
+        crate::gfx::renderer()
     }
 
     /// A window moved by something else is put back, at most three times. A window put in a frame

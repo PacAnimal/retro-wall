@@ -7,7 +7,7 @@
 //! Every picture is scaled for the monitor once and uploaded once; a frame is quads in the one vertex
 //! stream, turned in the vertex positions. The tank's liquid is drawn through the renderer's mask.
 
-use crate::elements::{Validate, check, each, positive, settings, within};
+use crate::elements::{Validate, check, each, named, positive, settings, within};
 use crate::gfx::{Blend, Gfx, Kind, Mask, Tex, Uploads};
 use crate::scene::*;
 use crate::tweaks::Colour;
@@ -21,6 +21,50 @@ use toml::Table;
 const MOST: usize = 64;
 /// The clock a part is drawn at in the still picture.
 const AT_REST: f64 = 0.0;
+
+/// The `Part` methods of a live element whose sprites are packed into one atlas (`self.atlas`, made by
+/// `self.atlas(g)`) and drawn as one texture (`self.tex`), paced by its `fps` setting.
+macro_rules! sprite_atlas_part {
+    () => {
+        fn live(&self) -> bool {
+            true
+        }
+        fn textures(&mut self, g: &Geo, _s: &Shared, up: &mut Uploads) {
+            self.atlas(g);
+            if let Some(a) = &mut self.atlas {
+                self.tex = Some(up.add(a.take(), Kind::Sprite));
+            }
+        }
+        fn interval(&self) -> f64 {
+            1.0 / self.s.fps
+        }
+    };
+}
+
+/// The rest of such a part's `Part` methods, where it settles at a time (`self.settle`, at `AT_REST`
+/// for the still picture) and draws one list of quads (`self.verts`).
+macro_rules! settled_sprites {
+    () => {
+        fn state(&mut self, g: &Geo, w: &mut World) -> u64 {
+            let t = frame(w.clock, self.s.fps);
+            self.settle(Some(&*w), t);
+            self.quads(g);
+            let mut h = 0;
+            hash_verts(&mut h, &self.verts);
+            h
+        }
+        fn draw(&mut self, _g: &Geo, gfx: &mut Gfx, _w: &World, _p: f64) {
+            gfx.draw(self.tex, &self.verts, Blend::Premultiplied);
+        }
+        fn rest(&mut self, g: &Geo, c: &Context, _s: &mut Shared) {
+            self.settle(None, AT_REST);
+            self.quads(g);
+            if let Some(a) = &self.atlas {
+                paint_quads(c, &a.surface, &self.verts);
+            }
+        }
+    };
+}
 
 // --- shared -----------------------------------------------------------------------------------------
 
@@ -165,11 +209,7 @@ fn paint_quads(c: &Context, s: &ImageSurface, data: &[f32]) {
         let (yx, yy) = (ey * ib.0 + fy * ib.1, ey * id.0 + fy * id.1);
         let m = Matrix::new(xx, yx, xy, yy, x0 - xx * a.0 - xy * a.1, y0 - yx * a.0 - yy * a.1);
         let _ = c.save();
-        c.move_to(x0, y0);
-        c.line_to(x1, y1);
-        c.line_to(x2, y2);
-        c.line_to(x3, y3);
-        c.close_path();
+        quad_path(c, [(x0, y0), (x1, y1), (x2, y2), (x3, y3)]);
         c.clip();
         c.transform(m);
         let white = (q[2] - alpha).abs() < 1e-4 && (q[3] - alpha).abs() < 1e-4 && (q[4] - alpha).abs() < 1e-4;
@@ -231,11 +271,6 @@ impl Drive {
         }
         idle + self.weight * (self.shown - idle)
     }
-}
-
-/// A setting naming a picture of the theme's.
-fn named(name: &str, v: &str) -> Result<(), String> {
-    if v.is_empty() { Err(format!("{name}: it names a picture of the theme's")) } else { Ok(()) }
 }
 
 fn most(name: &str, n: usize) -> Result<(), String> {
@@ -388,9 +423,7 @@ impl Rotors {
 }
 
 impl Part for Rotors {
-    fn live(&self) -> bool {
-        true
-    }
+    sprite_atlas_part!();
     fn top(&self, g: &Geo) -> i32 {
         // a pivot off centre: the farthest corner from it
         top_of(
@@ -401,12 +434,6 @@ impl Part for Rotors {
                 .map(|r| (r.at, [r.size[0] * 2.0 * r.pivot[0].max(1.0 - r.pivot[0]), r.size[1] * 2.0 * r.pivot[1].max(1.0 - r.pivot[1])], true)),
         )
     }
-    fn textures(&mut self, g: &Geo, _s: &Shared, up: &mut Uploads) {
-        self.atlas(g);
-        if let Some(a) = &mut self.atlas {
-            self.tex = Some(up.add(a.take(), Kind::Sprite));
-        }
-    }
     fn state(&mut self, g: &Geo, w: &mut World) -> u64 {
         let t = frame(w.clock, self.s.fps);
         let v = self.drive.value(w, self.s.ease, 0.0);
@@ -415,9 +442,6 @@ impl Part for Rotors {
         let mut h = 0;
         hash_verts(&mut h, &self.verts);
         h
-    }
-    fn interval(&self) -> f64 {
-        1.0 / self.s.fps
     }
     fn draw(&mut self, _g: &Geo, gfx: &mut Gfx, _w: &World, _p: f64) {
         gfx.draw(self.tex, &self.verts, Blend::Premultiplied);
@@ -886,40 +910,12 @@ impl Gauges {
 }
 
 impl Part for Gauges {
-    fn live(&self) -> bool {
-        true
-    }
+    sprite_atlas_part!();
     fn top(&self, g: &Geo) -> i32 {
         let k = self.s.needle_size.max(1.0);
         top_of(g, self.s.gauges.iter().map(|x| (x.at, [x.size * k, x.size * k], true)))
     }
-    fn textures(&mut self, g: &Geo, _s: &Shared, up: &mut Uploads) {
-        self.atlas(g);
-        if let Some(a) = &mut self.atlas {
-            self.tex = Some(up.add(a.take(), Kind::Sprite));
-        }
-    }
-    fn state(&mut self, g: &Geo, w: &mut World) -> u64 {
-        let t = frame(w.clock, self.s.fps);
-        self.settle(Some(&*w), t);
-        self.quads(g);
-        let mut h = 0;
-        hash_verts(&mut h, &self.verts);
-        h
-    }
-    fn interval(&self) -> f64 {
-        1.0 / self.s.fps
-    }
-    fn draw(&mut self, _g: &Geo, gfx: &mut Gfx, _w: &World, _p: f64) {
-        gfx.draw(self.tex, &self.verts, Blend::Premultiplied);
-    }
-    fn rest(&mut self, g: &Geo, c: &Context, _s: &mut Shared) {
-        self.settle(None, AT_REST);
-        self.quads(g);
-        if let Some(a) = &self.atlas {
-            paint_quads(c, &a.surface, &self.verts);
-        }
-    }
+    settled_sprites!();
 }
 
 // --- pilot lamps ------------------------------------------------------------------------------------
@@ -1057,18 +1053,10 @@ impl PilotLamps {
 }
 
 impl Part for PilotLamps {
-    fn live(&self) -> bool {
-        true
-    }
+    sprite_atlas_part!();
     fn top(&self, g: &Geo) -> i32 {
         let k = (2.0 * self.s.halo_size).max(1.0);
         top_of(g, self.s.lamps.iter().map(|l| (l.at, [l.size * k, l.size * k], false)))
-    }
-    fn textures(&mut self, g: &Geo, _s: &Shared, up: &mut Uploads) {
-        self.atlas(g);
-        if let Some(a) = &mut self.atlas {
-            self.tex = Some(up.add(a.take(), Kind::Sprite));
-        }
     }
     fn state(&mut self, g: &Geo, w: &mut World) -> u64 {
         let t = frame(w.clock, self.s.fps);
@@ -1081,9 +1069,6 @@ impl Part for PilotLamps {
         let mut h = 0;
         hash_verts(&mut h, &self.lit);
         h
-    }
-    fn interval(&self) -> f64 {
-        1.0 / self.s.fps
     }
     fn draw(&mut self, _g: &Geo, gfx: &mut Gfx, _w: &World, _p: f64) {
         gfx.draw(self.tex, &self.lit, Blend::Premultiplied);
@@ -1232,9 +1217,7 @@ impl Steam {
 }
 
 impl Part for Steam {
-    fn live(&self) -> bool {
-        true
-    }
+    sprite_atlas_part!();
     fn top(&self, g: &Geo) -> i32 {
         // a puff's top at its highest: its foot risen 0.42 of the plume above the vent's mouth, and
         // its own height (0.72 of the plume) above that
@@ -1246,33 +1229,7 @@ impl Part for Steam {
                 .flat_map(|v| [(v.at, v.size, false), ([v.at[0], v.at[1] - v.size[1] * 0.45 - v.plume[1] * 0.56], [v.plume[0] * 2.0, v.plume[1] * 2.0], true)]),
         )
     }
-    fn textures(&mut self, g: &Geo, _s: &Shared, up: &mut Uploads) {
-        self.atlas(g);
-        if let Some(a) = &mut self.atlas {
-            self.tex = Some(up.add(a.take(), Kind::Sprite));
-        }
-    }
-    fn state(&mut self, g: &Geo, w: &mut World) -> u64 {
-        let t = frame(w.clock, self.s.fps);
-        self.settle(Some(&*w), t);
-        self.quads(g);
-        let mut h = 0;
-        hash_verts(&mut h, &self.verts);
-        h
-    }
-    fn interval(&self) -> f64 {
-        1.0 / self.s.fps
-    }
-    fn draw(&mut self, _g: &Geo, gfx: &mut Gfx, _w: &World, _p: f64) {
-        gfx.draw(self.tex, &self.verts, Blend::Premultiplied);
-    }
-    fn rest(&mut self, g: &Geo, c: &Context, _s: &mut Shared) {
-        self.settle(None, AT_REST);
-        self.quads(g);
-        if let Some(a) = &self.atlas {
-            paint_quads(c, &a.surface, &self.verts);
-        }
-    }
+    settled_sprites!();
 }
 
 pub fn kinds() -> Vec<crate::elements::Kind> {

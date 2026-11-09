@@ -4,7 +4,7 @@
 
 use crate::config::Theme;
 use crate::scene::Edges;
-use crate::tweaks::TitleCorner;
+use crate::tweaks::{TitleCorner, Tweaks};
 use crate::util::*;
 use cairo::{Context, Filter, Format, ImageSurface, LineCap, LineJoin, Matrix};
 use std::collections::HashMap;
@@ -57,6 +57,33 @@ pub struct Ruler {
     pub left: f64,
     pub stop: f64,
     pub y: f64,
+}
+
+impl Ruler {
+    /// Each tick at `offset` (`Theme::tick_offset`), right to left: its x and its height, every fifth
+    /// long. Returns how much the vignette darkens them, 0 to 1. The still picture and the live ticks
+    /// both draw these.
+    pub fn each_tick(self, tw: &Tweaks, w: f64, h: f64, offset: f64, mut f: impl FnMut(f64, f64)) -> f64 {
+        let Ruler { left, stop, y } = self;
+        let step = 0.012 * w;
+        let right = stop + tw.ruler_end * w;
+        let mut k: i64 = -5;
+        loop {
+            let x = right - k as f64 * step - offset;
+            k += 1;
+            if x > stop {
+                continue;
+            }
+            if x < left {
+                break;
+            }
+            let tall = if (k - 1) % 5 == 0 { 4.0 } else { 2.0 };
+            f(x, tall);
+        }
+        let big = w.max(h);
+        let reach = ((left + stop) / 2.0 - w / 2.0).hypot(y - h / 2.0);
+        tw.vignette * 1f64.min(0f64.max((reach - 0.35 * big) / (0.4 * big)))
+    }
 }
 
 /// The corner brackets, inset from the work area.
@@ -498,27 +525,8 @@ impl Theme {
 
     /// The ruler's ticks at time t, every fifth long, dimmed to match the vignette.
     pub fn ticks(&self, c: &Context, width: i32, height: i32, ruler: Ruler, t: f64) {
-        let Ruler { left, stop, y } = ruler;
-        let w = width as f64;
-        let step = 0.012 * w;
         let offset = self.tick_offset(width, t);
-        let right = stop + self.tw.ruler_end * w;
-        let (cx, cy, big) = (w / 2.0, height as f64 / 2.0, width.max(height) as f64);
-        let r = ((left + stop) / 2.0 - cx).hypot(y - cy);
-        let dark = self.tw.vignette * 1f64.min(0f64.max((r - 0.35 * big) / (0.4 * big)));
-        let mut k: i64 = -5;
-        loop {
-            let x = right - k as f64 * step - offset;
-            k += 1;
-            if x > stop {
-                continue;
-            }
-            if x < left {
-                break;
-            }
-            let tall = if (k - 1) % 5 == 0 { 4.0 } else { 2.0 };
-            c.rectangle(x, y - tall, 1.0, tall);
-        }
+        let dark = ruler.each_tick(&self.tw, width as f64, height as f64, offset, |x, tall| c.rectangle(x, ruler.y - tall, 1.0, tall));
         let cap = self.tw.caption.rgb();
         c.set_source_rgba(cap.0 * (1.0 - dark), cap.1 * (1.0 - dark), cap.2 * (1.0 - dark), 0.55);
         let _ = c.fill();

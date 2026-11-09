@@ -1,6 +1,7 @@
 # phosphor: a synthwave horizon in the amber of an old CRT's phosphor. The default: with no theme named,
 # this is what is drawn. Its sun, floor, stripes and brackets are its own elements, and their
 # shapes its own tweaks, which [tweaks] here or in a theme that extends this one can set.
+format = 1                  # the theme format it is written for: EXTENDING.md, "What stays stable"
 name = "Phosphor"
 
 scene = ["sky", "sun", "rays", "shimmer", "mountains", "floor", "bloom", "horizon", "stripes", "title",

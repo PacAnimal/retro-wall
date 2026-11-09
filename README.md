@@ -83,7 +83,7 @@ the food the free memory, the experience bar the disk's activity and its level h
 matrix, racing and forest show only the scene by default, and blocky the scene and its interface. Set
 `[monitors]` in `retro.toml` to show the hostname, instruments and graph, as here. Any theme's parts are
 settings `retro.toml` can change, so a part is hidden or moved without a theme of your own: blocky's hand
-is off by default, and `[element.world]` with `hand = true` turns it on; `ui = false` hides the
+is off by default, and `[element.block-world]` with `hand = true` turns it on; `ui = false` hides the
 interface. `pig = true` lets a pig loose on blocky's farm that keeps to no physics: it walks straight up
 walls and over the roofs, bounces, flies by, goes up in a puff of smoke and comes down in another or drops
 out of the sky, tumbles down the mountains, and eats the crops.
@@ -103,8 +103,9 @@ theme is cropped around a point the theme sets:
 
 ## Install
 
-Each release has an archive for Linux (x86_64), macOS (Apple silicon) and Windows (x86_64): the
-program, the themes and that system's installer. Unpack it and run the installer as yourself, not as
+Each [release](https://github.com/PacAnimal/retro-wall/releases/latest) has an archive for Linux
+(x86_64), macOS (Apple silicon) and Windows (x86_64): the program, the themes and that system's
+installer. Unpack it and run the installer as yourself, not as
 an administrator. Running it again updates; the uninstaller puts the desktop's own wallpaper back.
 
 **Linux** (X11: XFCE, KDE Plasma, GNOME, Cinnamon, MATE, LXDE, or a window manager alone; glibc 2.35 or
@@ -216,7 +217,11 @@ A new measurement is a program that prints a number; a new instrument a program 
 drawing operations; a new theme a `theme.toml` and pictures, with GLSL for motion of its own.
 `retro-wall --new source|face|theme NAME` writes a working, commented start, and `examples/` has more
 to copy: a `retro.toml` with the instruments moved and plugins added, sources (a clock, the GPU's
-temperature, news headlines), an instrument, and a theme with a shader. See `EXTENDING.md`.
+temperature, news headlines), an instrument, and a theme with a shader. See `EXTENDING.md`. Themes and
+plugins are written against a numbered format and protocol that stay the same across releases
+(`EXTENDING.md`, "What stays stable").
+
+Contributions are welcome: `CONTRIBUTING.md`.
 
 ## Tests
 
@@ -234,6 +239,7 @@ Without them they are skipped.
 `RETRO_TEST_FULL=1` runs every limit case, not a sample. The install test runs a desktop in a
 container: `docker run --rm -v "$PWD:/src:ro" debian:trixie /src/tests/linux/container xfce` (after
 `cargo build --release --example screen`). CI (`.github/workflows/`) runs all of it, and builds for
-macOS and Windows; a `v*` tag makes a release.
+macOS and Windows. A `v*` tag on a commit whose tests passed makes a release, its notes from
+`CHANGELOG.md`.
 
 How it is built: `ARCHITECTURE.md`. License: GPL-3.0-only (`LICENSE`), copyright © 2026 Øyvind Hvidsten; the font's own is `fonts/LICENSE`.

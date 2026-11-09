@@ -3,7 +3,7 @@
 //! rain behind it and drops on it. Sizes, positions and masks come from the theme's file.
 
 use crate::config::Theme;
-use crate::elements::{Validate, check, each, settings, within};
+use crate::elements::{Validate, check, each, named, settings, within};
 use crate::gfx::{self, Blend, Gfx, Kind, Tex, Uploads};
 use crate::rng::Rng;
 use crate::scene::*;
@@ -50,11 +50,6 @@ fn on_screen(g: &Geo, rel: &str, x: f64, y: f64, w: f64, h: f64, k: (f64, f64)) 
         let _ = c.paint();
     }
     (out, x0 as i32, y0 as i32)
-}
-
-/// A setting naming a picture: it must name one.
-fn named(name: &str, v: &str) -> Result<(), String> {
-    if v.is_empty() { Err(format!("{name}: it names a picture of the theme's")) } else { Ok(()) }
 }
 
 /// A setting that is a range [lo, hi]: lo at most hi, and lo over `floor` (or at least it, with `or_equal`).

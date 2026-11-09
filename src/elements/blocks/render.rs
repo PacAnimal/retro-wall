@@ -202,13 +202,6 @@ pub struct Frame {
     pub sun: Vec<u8>,
 }
 
-fn hash3(x: i32, y: i32, z: i32) -> u32 {
-    let mut h = (x as u32).wrapping_mul(0x8da6_b343) ^ (y as u32).wrapping_mul(0xd816_3841) ^ (z as u32).wrapping_mul(0xcb1a_b31f);
-    h ^= h >> 13;
-    h = h.wrapping_mul(0x5bd1_e995);
-    h ^ (h >> 15)
-}
-
 impl<'a> Tracer<'a> {
     pub fn new(world: &'a World, tex: &'a Textures, cam: Camera, fog: (f64, f64), suns: [V3; SUNS], arm: bool) -> Tracer<'a> {
         Tracer { world, tex, cam, fog, suns, arm: arm.then(Arm::new), footprint: cam.pixel() * 16.0 }
@@ -283,7 +276,7 @@ impl<'a> Tracer<'a> {
             _ => (1.0 - f[0], 1.0 - f[1], 0, 1, 1),
         };
         if b.turned && which != 1 {
-            match hash3(cell[0], cell[1], cell[2]) & 3 {
+            match crate::rng::lattice(cell[0], cell[1], cell[2]) & 3 {
                 1 => (u, v) = (v, 1.0 - u),
                 2 => (u, v) = (1.0 - u, 1.0 - v),
                 3 => (u, v) = (1.0 - v, u),

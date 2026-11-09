@@ -1,0 +1,40 @@
+name: Bug
+description: Something retro-wall does wrong, or does not do
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens, and what you expected
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: retro-wall --version
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: Linux distribution and desktop, macOS or Windows version; the GPU
+      placeholder: Debian 13, XFCE 4.20, Intel UHD 620
+    validations:
+      required: true
+  - type: input
+    id: theme
+    attributes:
+      label: Theme
+      placeholder: phosphor
+  - type: textarea
+    id: output
+    attributes:
+      label: What retro-wall said
+      description: Its output when started in a terminal, or its log (CONTRIBUTING.md, "Reporting a problem")
+      render: text
+  - type: textarea
+    id: picture
+    attributes:
+      label: Picture
+      description: For a picture that is wrong, attach `retro-wall --snapshot out.png --demo 13:37`

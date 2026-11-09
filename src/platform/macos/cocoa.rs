@@ -22,7 +22,7 @@ use objc2_app_kit::{
 use objc2_core_graphics::{CGWindowLevelForKey, CGWindowLevelKey, CGWindowListCopyWindowInfo, CGWindowListOption};
 use objc2_foundation::{NSArray, NSDate, NSDefaultRunLoopMode, NSDictionary, NSPoint, NSRect, NSSize, NSString};
 use std::collections::HashMap;
-use std::ffi::{CStr, CString, c_void};
+use std::ffi::{CString, c_void};
 use std::ptr::NonNull;
 use std::time::Duration;
 
@@ -263,11 +263,7 @@ impl crate::platform::Display for Quartz {
     }
 
     fn renderer(&self) -> String {
-        // SAFETY: a context is current; GetString returns a static NUL-terminated string or null.
-        unsafe {
-            let p = gl::GetString(gl::RENDERER);
-            if p.is_null() { String::new() } else { CStr::from_ptr(p as *const _).to_string_lossy().into_owned() }
-        }
+        crate::gfx::renderer()
     }
 
     /// Cocoa's events handed on; the windows made since, and those that came back into view.

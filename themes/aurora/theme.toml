@@ -1,9 +1,10 @@
 # aurora: an arctic night. Aurora curtains drift slowly across a clear sky full of stars, rising, falling
 # and shimmering, over snowy massifs on the horizon; the open water below mirrors both, swaying.
 #
+format = 1                  # the theme format it is written for: EXTENDING.md, "What stays stable"
 name = "Aurora"
 
-scene = ["sky", "aurora", "ranges", "lake", "water", "mountains", "title", "instruments", "finish", "ruler"]
+scene = ["sky", "northern-lights", "ranges", "lake", "water", "mountains", "title", "instruments", "finish", "ruler"]
 
 [palette]
 base = "#030914"

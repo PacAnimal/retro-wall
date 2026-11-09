@@ -1,0 +1,31 @@
+name: Theme
+description: A theme you want to add, or an idea for one
+labels: [theme]
+body:
+  - type: textarea
+    id: scene
+    attributes:
+      label: The scene
+      description: What it shows, and what moves
+    validations:
+      required: true
+  - type: textarea
+    id: kinds
+    attributes:
+      label: Elements
+      description: The element kinds it uses (`retro-wall --list`), and any new kind it needs
+  - type: dropdown
+    id: art
+    attributes:
+      label: The art
+      options:
+        - My own
+        - Under a license that lets it be shared under the GPL-3.0
+        - None yet
+    validations:
+      required: true
+  - type: textarea
+    id: picture
+    attributes:
+      label: Picture
+      description: A sketch, or `retro-wall --snapshot out.png --demo 13:37 --theme NAME`

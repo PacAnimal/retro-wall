@@ -6,6 +6,7 @@
 # The `day` tweak is the hours the sun is up; by
 # day the [day] look lies over the palette and tweaks below (which are the night's), so the instruments
 # read on a bright sky. --demo HH:mm holds the time of day, to see it at noon now.
+format = 1                  # the theme format it is written for: EXTENDING.md, "What stays stable"
 name = "Winter"
 
 scene = ["sky", "clouds", "orb", "beams", "land", "haze", "mountains", "snow", "title", "instruments", "finish", "ruler"]

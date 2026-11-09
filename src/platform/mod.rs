@@ -5,6 +5,52 @@
 
 use std::time::Duration;
 
+/// A `Platform`'s readings of the machine, each from the same function of its `system` module: in
+/// each platform's `impl Platform`.
+macro_rules! readings_from_system {
+    () => {
+        fn power() -> crate::platform::Power {
+            system::power()
+        }
+
+        fn port_connected(port: u16) -> bool {
+            system::port_connected(port)
+        }
+
+        fn cpu_times() -> Option<(u64, u64)> {
+            system::cpu_times()
+        }
+
+        fn memory() -> Option<(f64, f64)> {
+            system::memory()
+        }
+
+        fn disk_ios() -> u64 {
+            system::disk_ios()
+        }
+
+        fn drive_space(path: &str) -> Option<(f64, f64)> {
+            system::drive_space(path)
+        }
+
+        fn net_counts(only: &[String]) -> std::collections::HashMap<String, (u64, u64)> {
+            system::net_counts(only)
+        }
+
+        fn addresses() -> (Option<String>, Option<String>) {
+            system::addresses()
+        }
+
+        fn hostname() -> String {
+            system::hostname()
+        }
+    };
+}
+pub(crate) use readings_from_system;
+
+#[cfg(unix)]
+mod unix;
+
 #[cfg(target_os = "linux")]
 pub mod linux;
 #[cfg(target_os = "linux")]
@@ -209,6 +255,14 @@ pub trait Desktop {
 pub struct Route {
     pub gateway: Option<String>,
     pub metric: i64,
+}
+
+/// This machine's address on the network: the one its traffic to the internet leaves from. Nothing is
+/// sent: a UDP socket only picks the route.
+pub fn primary_address() -> Option<String> {
+    let s = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    s.connect("1.1.1.1:53").ok()?;
+    Some(s.local_addr().ok()?.ip().to_string())
 }
 
 /// The router the status line shows: the next hop of the best (lowest-metric) default route; none

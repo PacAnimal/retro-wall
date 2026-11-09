@@ -12,6 +12,7 @@
 # The hostname, the instruments and the network's graph are all there, and all hidden: show any in
 # retro.toml's [monitors] (title = "rightmost", widgets = "rightmost", graph = "rightmost").
 #
+format = 1                  # the theme format it is written for: EXTENDING.md, "What stays stable"
 name = "Matrix"
 
 scene = ["void", "rain", "codetitle", "mountains", "instruments", "finish"]
