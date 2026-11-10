@@ -126,8 +126,33 @@ Hyprland, which start no autostart entries, the installer adds one marked line t
 config, and the uninstaller takes it out. GNOME has no layer-shell: there the wall runs through
 XWayland, as GNOME's own desktop icons do. `RETRO_BACKEND=x11` or `=wayland` chooses for yourself.
 Wayland does not tell a program where the panels are: give their room with `--reserve-top` and the
-like. On KDE Plasma under Wayland the wall lies over Plasma's own desktop, so its icons and widgets
-are not seen (a click still reaches them); under X11 they show over the wall.
+like. On KDE Plasma the installer adds a Plasma wallpaper of retro-wall's and a KWin script, which keep
+Plasma's icons and widgets over the wall (Plasma's desktop is started again once, the first time it
+is installed from inside a Wayland session; installed from outside one, from the next login).
+
+On every desktop the icons, panels, widgets and right-click menu stay over the wall. The install tests
+check that on each desktop below, in a container (`tests/linux/container`): install, update and
+uninstall; each icon, panel and widget seen over the wall as over the user's own wallpaper, after the
+install, after an update, and after the desktop's own program starts again under the running wall; the
+right-click menu over the wall; a click anywhere going to the desktop; and the wall left where it is
+while nothing changes.
+
+| Environment | Session | Tested on | Over the wall, checked | Notes |
+|---|---|---|---|---|
+| XFCE | X11 | Debian 13, Ubuntu 24.04, Fedora, Arch | icons, panel, menu | |
+| KDE Plasma 6 | X11 | Debian 13 | icons, panel, widget, menu | |
+| KDE Plasma 6 | Wayland | Debian 13 | icons, panel, widget, menu | a Plasma wallpaper and a KWin script, both removed on uninstall |
+| GNOME | X11 | Debian 13 | panel, menu | GNOME draws no desktop icons of its own |
+| GNOME | Wayland | Debian 13 | panel, menu | through XWayland (GNOME has no layer-shell) |
+| Cinnamon | X11 | Debian 13 | icons, panel, menu | retro-wall added to Nemo's `ignored-desktop-handlers` |
+| MATE | X11 | Debian 13 | icons, panel, menu | |
+| LXDE | X11 | Debian 13 | icons, panel, menu | |
+| A window manager alone (openbox) | X11 | Debian 13 | panel, the window manager's menu | the still picture under the wall |
+| sway | Wayland | Debian 13 | bar | over swaybg's wallpaper |
+| Hyprland | Wayland | Arch Linux, in a virtual machine | bar | started from the line added to its config at the next login; tested in a throwaway virtual machine, as it renders only through a KMS device |
+| Other layer-shell compositors (labwc, niri, COSMIC) | Wayland | not tested | | expected to work as sway does |
+| macOS 11 or later | | macOS (CI) | | the program's tests |
+| Windows 10 and 11 | | built in CI | | the program's tests run on Linux and macOS |
 
 **macOS** (11 or later):
 
@@ -251,8 +276,10 @@ Without them they are skipped.
 `RETRO_BLESS=1 cargo test --release --test gl` writes the reference pictures again;
 `RETRO_TEST_FULL=1` runs every limit case, not a sample. The install test runs a desktop in a
 container: `docker run --rm -v "$PWD:/src:ro" debian:trixie /src/tests/linux/container xfce` (after
-`cargo build --release --example screen`); `sway`, `kde-wayland` and `gnome-wayland` run the Wayland
-desktops, nested on a virtual X server. CI (`.github/workflows/`) runs all of it, and builds for
+`cargo build --release --example screen`); the table under "Install" names every desktop it runs.
+`sway`, `kde-wayland` and `gnome-wayland` run the Wayland desktops, nested on a virtual X server.
+Hyprland, which renders only through a KMS device, runs in a throwaway virtual machine instead:
+`tests/linux/vm hyprland` (KVM and QEMU; it boots Arch Linux's cloud image). CI (`.github/workflows/`) runs all of it, and builds for
 macOS and Windows. A `v*` tag on a commit whose tests passed makes a release, its notes from
 `CHANGELOG.md`.
 

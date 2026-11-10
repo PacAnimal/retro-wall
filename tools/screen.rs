@@ -1,14 +1,30 @@
-//! screen: what the screen showed, from xwd's dumps of the root window (`xwd -root -silent >FILE`), for
-//! the Linux install test. Each prints a share, 0 to 1:
+//! screen: what the screen showed, from xwd's dumps of the root window (`xwd -root -silent >FILE`), or
+//! grim's PNGs of a Wayland compositor's screen, for the Linux install test. Each prints a share, 0 to 1:
 //!
 //!   screen near DUMP #rrggbb     of the pixels, those within 24 of that colour in every channel
 //!   screen like DUMP PNG         of the pixels, those within 24 of the PNG's at the same place
 //!   screen differ DUMP DUMP      of the pixels, those that differ between the two
+//!   screen kept REF BASE DUMP [OVER]   what the desktop drew: the pixels where REF differs from BASE (a
+//!                                dump, or #rrggbb), and so do their four neighbours (over its own
+//!                                wallpaper or before a menu opened, without its edges, which blend with
+//!                                what is under them); with OVER, the same desktop over another
+//!                                background, only those it shows alike there too (what it draws opaque:
+//!                                not a shadow or a see-through label, which show what is under them).
+//!                                Of each part of it (pixels touching one another, MIN_PART or more), the
+//!                                share DUMP shows as REF does: the least of them. On stderr, each part,
+//!                                and how much of the screen it all is
+//!                                Less than MIN_DRAWN of it: no answer, the test would prove nothing
+//!   screen drawn-as REF BASE #rrggbb   of all the pixels kept looks at, those within 24 of that colour
+//!                                (a menu that drew nothing but black)
 //!   screen clicks                of the nine parts of $DISPLAY's screen, three by three, those where a
 //!                                click at the middle goes past retro-wall (and any frame it is in) to
 //!                                what is under it
 
 const TOLERANCE: u8 = 24;
+/// The least share of the screen `kept` looks at.
+const MIN_DRAWN: f64 = 0.002;
+/// The least part, in pixels, `kept` tells of on its own.
+const MIN_PART: usize = 200;
 
 /// A picture: width, height, and (r, g, b) by row.
 struct Picture {
@@ -26,6 +42,13 @@ impl Picture {
 fn fail(why: String) -> ! {
     eprintln!("screen: {why}");
     std::process::exit(2)
+}
+
+/// A screen dump: grim's PNG (a compositor's own screen, as on Hyprland), else xwd's.
+fn load(path: &str) -> Picture {
+    let mut head = [0u8; 8];
+    let png_file = std::fs::File::open(path).and_then(|mut f| std::io::Read::read_exact(&mut f, &mut head)).is_ok() && head == *b"\x89PNG\r\n\x1a\n";
+    if png_file { png(path) } else { xwd(path) }
 }
 
 /// An xwd dump: a ZPixmap of 24 or 32 bits a pixel, true colour.
@@ -70,6 +93,66 @@ fn png(path: &str) -> Picture {
         [d[i + 2], d[i + 1], d[i]]
     });
     Picture { w, h, px: px.collect() }
+}
+
+/// What the desktop drew: the pixels where `r` differs from `base` (a dump, or #rrggbb), and so do their
+/// four neighbours (without its edges, which blend with what is under them). Too few of them to tell
+/// anything by ends the program.
+fn footprint(r: &Picture, base: &str, over: Option<&Picture>) -> Vec<bool> {
+    let (flat, under) = match base.starts_with('#') {
+        true => (Some(colour(base)), None),
+        false => (None, Some(load(base))),
+    };
+    if under.iter().chain(over).any(|b| (b.w, b.h) != (r.w, r.h)) {
+        fail("the dumps differ in size".into());
+    }
+    let differs = |x: usize, y: usize| !near(r.at(x, y), flat.unwrap_or_else(|| under.as_ref().map_or([0; 3], |b| b.at(x, y))));
+    let drawn = |x: usize, y: usize| {
+        x > 0 && y > 0 && x + 1 < r.w && y + 1 < r.h && [(x, y), (x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)].iter().all(|&(a, b)| differs(a, b))
+    };
+    let opaque = |x: usize, y: usize| over.is_none_or(|o| near(r.at(x, y), o.at(x, y)));
+    let mask: Vec<bool> = (0..r.h).flat_map(|y| (0..r.w).map(move |x| (x, y))).map(|(x, y)| drawn(x, y) && opaque(x, y)).collect();
+    let area = mask.iter().filter(|&&d| d).count() as f64 / mask.len().max(1) as f64;
+    eprintln!("the desktop drew {:.2}% of the screen", area * 100.0);
+    if area < MIN_DRAWN {
+        fail(format!("the desktop drew {:.3}% of the screen there: too little to tell", area * 100.0));
+    }
+    mask
+}
+
+/// The parts of a footprint, each a set of pixels touching one another; those under MIN_PART pixels (a
+/// letter, a clock's digit) left out.
+fn parts(mask: &[bool], w: usize) -> Vec<Vec<usize>> {
+    let mut seen = vec![false; mask.len()];
+    let mut out = vec![];
+    for start in 0..mask.len() {
+        if !mask[start] || seen[start] {
+            continue;
+        }
+        let (mut part, mut todo) = (vec![], vec![start]);
+        seen[start] = true;
+        while let Some(i) = todo.pop() {
+            part.push(i);
+            let (x, y) = (i % w, i / w);
+            let next = [(x > 0).then(|| i - 1), (x + 1 < w).then(|| i + 1), (y > 0).then(|| i - w), (i + w < mask.len()).then(|| i + w)];
+            for j in next.into_iter().flatten() {
+                if mask[j] && !seen[j] {
+                    seen[j] = true;
+                    todo.push(j);
+                }
+            }
+        }
+        if part.len() >= MIN_PART {
+            out.push(part);
+        }
+    }
+    out
+}
+
+/// "#rrggbb" as its three bytes.
+fn colour(text: &str) -> [u8; 3] {
+    let hex = |i: usize| text.get(i..i + 2).and_then(|s| u8::from_str_radix(s, 16).ok()).unwrap_or_else(|| fail(format!("{text}: not #rrggbb")));
+    [hex(1), hex(3), hex(5)]
 }
 
 fn near(a: [u8; 3], b: [u8; 3]) -> bool {
@@ -198,25 +281,47 @@ fn main() {
     let a: Vec<String> = std::env::args().skip(1).collect();
     let a: Vec<&str> = a.iter().map(String::as_str).collect();
     let v = match a.as_slice() {
-        ["near", dump, colour] => {
-            let p = xwd(dump);
-            let hex = |i: usize| colour.get(i..i + 2).and_then(|s| u8::from_str_radix(s, 16).ok()).unwrap_or_else(|| fail(format!("{colour}: not #rrggbb")));
-            let c = [hex(1), hex(3), hex(5)];
+        ["near", dump, c] => {
+            let (p, c) = (load(dump), colour(c));
             share(p.w, p.h, 4, |x, y| near(p.at(x, y), c))
         }
         ["like", dump, picture] => {
-            let (p, q) = (xwd(dump), png(picture));
+            let (p, q) = (load(dump), png(picture));
             share(p.w, p.h, 4, |x, y| x < q.w && y < q.h && near(p.at(x, y), q.at(x, y)))
         }
         ["differ", one, two] => {
-            let (p, q) = (xwd(one), xwd(two));
+            let (p, q) = (load(one), load(two));
             if (p.w, p.h) != (q.w, q.h) {
                 fail("the dumps differ in size".into());
             }
             share(p.w, p.h, 2, |x, y| p.at(x, y) != q.at(x, y))
         }
+        ["kept", reference, base, dump, over @ ..] if over.len() <= 1 => {
+            let (r, d, over) = (load(reference), load(dump), over.first().map(|o| load(o)));
+            if (r.w, r.h) != (d.w, d.h) {
+                fail("the dumps differ in size".into());
+            }
+            // each part on its own: a large one (a panel) must not hide a small one (an icon) under it
+            let parts = parts(&footprint(&r, base, over.as_ref()), r.w);
+            if parts.is_empty() {
+                fail(format!("no part of {MIN_PART} pixels or more drawn: nothing to tell by"));
+            }
+            let worst = parts.iter().map(|p| {
+                let kept = p.iter().filter(|&&i| near(r.px[i], d.px[i])).count() as f64 / p.len() as f64;
+                let (x, y) = (p.iter().map(|i| i % r.w).min().unwrap_or(0), p.iter().map(|i| i / r.w).min().unwrap_or(0));
+                eprintln!("  a part of {} pixels at {x},{y}: {kept:.3} kept", p.len());
+                kept
+            });
+            worst.fold(f64::NAN, f64::min)
+        }
+        ["drawn-as", reference, base, c] => {
+            let (r, c) = (load(reference), colour(c));
+            let mask = footprint(&r, base, None);
+            let all = mask.iter().filter(|&&m| m).count();
+            mask.iter().enumerate().filter(|&(i, &m)| m && near(r.px[i], c)).count() as f64 / all.max(1) as f64
+        }
         ["clicks"] => clicks(),
-        _ => fail("near DUMP #rrggbb | like DUMP PNG | differ DUMP DUMP | clicks".into()),
+        _ => fail("near DUMP #rrggbb | like DUMP PNG | differ DUMP DUMP | kept REF BASE DUMP [OVER] | drawn-as REF BASE #rrggbb | clicks".into()),
     };
     println!("{v}");
 }

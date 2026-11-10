@@ -107,10 +107,40 @@ A theme's `shader` element is written once in GLSL 1.20 and runs on both profile
   wallpaper the compositor closes (layer_surface.closed) takes its output out of the screens until the
   frame loop has closed it, so the loop makes it again.
 - **The connection gone** (the compositor ended, a protocol error) ends retro-wall, as on X11.
-- **KDE Plasma**: the wall and Plasma's desktop share KWin's desktop layer, the newer on top: the wall
-  covers Plasma's icons and widgets, which take clicks through it.
+- **KDE Plasma**: the wall and Plasma's desktop share KWin's desktop layer, the newer on top. Two small
+  packages (`linux/kde/`, installed by `linux/install`) keep Plasma over the wall: a Plasma wallpaper
+  that makes Plasma's desktop see-through where the wall is live (the still picture elsewhere), and a
+  KWin script that keeps the wall below Plasma's desktop (`workspace.constrain` from KWin 6.5, else by
+  raising the desktop) and tells the wallpaper where the wall is live. Plasma's desktop window says all
+  of it is opaque, so KWin would stop painting the wall under it: while a wall is up the script sets
+  that window's opacity to 0.999, which looks the same, and back to 1 after. retro-wall chooses that
+  wallpaper under Wayland; the installer starts plasmashell again when the wallpaper is new, as only a
+  desktop window made with it chosen can be see-through.
 - **GNOME** has no layer-shell: the wall runs through XWayland, where Mutter keeps an X11 window of type
   desktop under the others.
+
+## X11 stacking
+
+The wall is a window of type desktop, kept among the desktop windows of its own monitor by itself,
+whatever the window manager makes of a raise (none running; muffin): under Nemo's (Cinnamon's, which is
+see-through where composited and draws its icons over it); else just above the desktop's own window,
+whose icons it lays over the wall (Composite); else under every window. Its own backdrop (the still
+picture, where no desktop draws one) goes just under it. Where they already are, nothing is sent.
+Panels, menus and widgets are other windows, above them all. `_NET_WM_BYPASS_COMPOSITOR` 2 keeps a
+compositor from taking it out of compositing.
+
+muffin paints the desktop windows in a group of their own, in the order they were mapped, and sorts that
+group by the stacking only when the stacking of its other windows changes. A wall mapped after Nemo's
+desktop, or moved under it, is painted over Nemo's icons until then. So once the wall is seen in its
+place under a Nemo window it has not yet been sorted under (first, and again after each move), it maps a
+window that muffin manages (a dock, 1x1, off the screen, fully transparent, in no taskbar, taking no
+focus), waits until muffin lists it (a second at most), and destroys it: muffin sorts the group. A window
+manager that does not move the wall never gets it.
+
+Nemo makes no desktop of its own where it finds another program's window of type desktop, unless that
+program's WM_CLASS is in `org.nemo.desktop ignored-desktop-handlers`. The installer adds `retro-wall`
+there (`linux/lib/nemo`), and the uninstaller takes it out, resetting the setting where only its default
+is left.
 
 ## Windows
 

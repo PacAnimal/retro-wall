@@ -739,10 +739,10 @@ pub fn run(loaded: &Loaded, o: Options) {
         }
         if due.restack {
             for m in &monitors {
-                if let Some((b, _, _)) = &m.backdrop {
-                    d.raise(*b);
-                }
                 d.raise(m.window);
+                if let Some((b, _, _)) = &m.backdrop {
+                    d.raise_under(*b, m.window);
+                }
             }
             for m in &stills {
                 d.raise(m.window);
@@ -937,6 +937,7 @@ fn open_monitor(
                 mon.backdrop = Some((win, g, t));
                 d.make_current(mon.window);
                 d.raise(mon.window);
+                d.raise_under(win, mon.window);
             }
             Err(e) => crate::errln!("{}: the still picture's window: {e}", s.name),
         },

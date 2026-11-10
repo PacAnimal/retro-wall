@@ -6,11 +6,12 @@
 
 use super::composite::{Composite, DamageNotify};
 use crate::platform::{Edges, Rect, Screen, WindowId};
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_long, c_uchar, c_uint, c_ulong};
 use std::ptr::null_mut;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use x11_dl::{dpms, glx, xfixes, xlib, xrandr};
 
 /// The atoms used, interned in one round trip when the display opens.
@@ -33,6 +34,10 @@ struct Atoms {
     skip_taskbar: c_ulong,
     skip_pager: c_ulong,
     compositor: c_ulong,
+    /// _NET_WM_BYPASS_COMPOSITOR: 2 asks a compositor never to take a window out of compositing.
+    bypass: c_ulong,
+    type_dock: c_ulong,
+    opacity: c_ulong,
     /// Window types that never hide the desktop: the desktop's own, popups, tooltips, notifications.
     passing: [c_ulong; 6],
 }
@@ -64,6 +69,9 @@ impl Atoms {
             "_NET_WM_WINDOW_TYPE_DND",
             "_NET_WM_WINDOW_TYPE_POPUP_MENU",
             "_NET_WM_WINDOW_TYPE_DROPDOWN_MENU",
+            "_NET_WM_BYPASS_COMPOSITOR",
+            "_NET_WM_WINDOW_TYPE_DOCK",
+            "_NET_WM_WINDOW_OPACITY",
         ];
         let owned: Vec<CString> = names.iter().map(|n| CString::new(*n).unwrap_or_default()).collect();
         let mut ptrs: Vec<*mut c_char> = owned.iter().map(|c| c.as_ptr() as *mut c_char).collect();
@@ -89,6 +97,9 @@ impl Atoms {
             skip_taskbar: a[15],
             skip_pager: a[16],
             compositor: a[17],
+            bypass: a[23],
+            type_dock: a[24],
+            opacity: a[25],
             passing: [a[11], a[18], a[19], a[20], a[21], a[22]],
         }
     }
@@ -99,6 +110,8 @@ struct Win {
     core: bool,
     place: (i32, i32),
     moved_back: u32,
+    /// The Nemo window muffin has been made to paint it under (`sort_desktops`), 0 for none.
+    sorted: Cell<c_ulong>,
 }
 
 pub struct X {
@@ -201,6 +214,61 @@ impl X {
         }
     }
 
+    /// Whether a window is of type desktop.
+    fn is_desktop(&self, w: c_ulong) -> bool {
+        self.longs(w, self.atoms.wm_type, 16).unwrap_or_default().contains(&self.atoms.type_desktop)
+    }
+
+    /// A window's class (WM_CLASS's second word).
+    fn class(&self, w: c_ulong) -> Option<String> {
+        // SAFETY: an open display; the hint's strings are Xlib's, checked for null and freed with XFree.
+        unsafe {
+            let mut hint: xlib::XClassHint = std::mem::zeroed();
+            if (self.xl.XGetClassHint)(self.dpy, w, &mut hint) == 0 {
+                return None;
+            }
+            let class = (!hint.res_class.is_null()).then(|| CStr::from_ptr(hint.res_class).to_string_lossy().into_owned());
+            for p in [hint.res_name, hint.res_class] {
+                if !p.is_null() {
+                    (self.xl.XFree)(p as *mut _);
+                }
+            }
+            class
+        }
+    }
+
+    /// Where a window is on the screen.
+    fn area(&self, w: c_ulong) -> Option<Rect> {
+        // SAFETY: an open display; XWindowAttributes is plain data, filled in by the call; out-pointers to locals.
+        unsafe {
+            let mut a: xlib::XWindowAttributes = std::mem::zeroed();
+            if (self.xl.XGetWindowAttributes)(self.dpy, w, &mut a) == 0 {
+                return None;
+            }
+            let (mut x, mut y, mut child) = (0, 0, 0);
+            (self.xl.XTranslateCoordinates)(self.dpy, w, self.root, 0, 0, &mut x, &mut y, &mut child);
+            Some(Rect::new(x as i64, y as i64, (x + a.width) as i64, (y + a.height) as i64))
+        }
+    }
+
+    /// The top-level windows, bottom first: the window manager's stacking list, else (none running) the
+    /// server's own order of the root's children.
+    fn stacking(&self) -> Vec<c_ulong> {
+        if let Some(list) = self.longs(self.root, self.atoms.stacking, 4096) {
+            return list;
+        }
+        // SAFETY: an open display; XQueryTree's list is Xlib's, checked for null, read within its count and freed.
+        unsafe {
+            let (mut r, mut parent, mut kids, mut n) = (0, 0, std::ptr::null_mut(), 0 as c_uint);
+            if (self.xl.XQueryTree)(self.dpy, self.root, &mut r, &mut parent, &mut kids, &mut n) == 0 || kids.is_null() {
+                return vec![];
+            }
+            let out = std::slice::from_raw_parts(kids, n as usize).to_vec();
+            (self.xl.XFree)(kids as *mut _);
+            out
+        }
+    }
+
     fn clients(&self) -> Option<Vec<c_ulong>> {
         self.longs(self.root, self.atoms.stacking, 4096).or_else(|| self.longs(self.root, self.atoms.clients, 4096))
     }
@@ -218,6 +286,56 @@ impl X {
                 return false;
             }
             enabled != 0 && level != 0
+        }
+    }
+
+    /// `win` put `mode` (Above or Below) `sibling`, or at the bottom with none, through the window manager.
+    fn restack(&self, win: c_ulong, sibling: Option<c_ulong>, mode: c_int) {
+        // SAFETY: an open display and a window of ours; XWindowChanges is plain data, read by the call.
+        unsafe {
+            let mut ch: xlib::XWindowChanges = std::mem::zeroed();
+            ch.stack_mode = mode;
+            let mut mask = xlib::CWStackMode;
+            if let Some(d) = sibling {
+                ch.sibling = d;
+                mask |= xlib::CWSibling;
+            }
+            (self.xl.XReconfigureWMWindow)(self.dpy, win, self.screen, mask as c_uint, &mut ch);
+            (self.xl.XFlush)(self.dpy);
+        }
+    }
+
+    /// Makes muffin (Cinnamon's compositor) paint the desktop windows in their stacking order. It keeps
+    /// them in a group of their own, in the order they were mapped, and sorts that group only when the
+    /// stacking of its other windows changes: a wall mapped after Nemo's desktop, or moved under it, is
+    /// painted over Nemo's icons until then. A window it manages, mapped and gone again, is such a change:
+    /// a dock (no frame, no focus, in no taskbar), 1x1, off the screen and fully transparent, waited for
+    /// (a second at most) until muffin lists it.
+    fn sort_desktops(&self) {
+        // SAFETY: an open display; the window is made, mapped and destroyed here; XSetWindowAttributes is
+        // plain data, read by the call; the hints are Xlib's, checked for null and freed with XFree.
+        unsafe {
+            let mut swa: xlib::XSetWindowAttributes = std::mem::zeroed();
+            let nudge = (self.xl.XCreateWindow)(self.dpy, self.root, -100, -100, 1, 1, 0, 0, xlib::InputOutput as c_uint, null_mut(), 0, &mut swa);
+            let a = &self.atoms;
+            self.set_property(nudge, a.wm_type, a.atom, &[a.type_dock]);
+            self.set_property(nudge, a.wm_state, a.atom, &[a.skip_taskbar, a.skip_pager]);
+            self.set_property(nudge, a.opacity, a.cardinal, &[0]); // not seen where it is moved onto the screen
+            let hints = (self.xl.XAllocWMHints)();
+            if !hints.is_null() {
+                (*hints).flags = xlib::InputHint;
+                (*hints).input = 0;
+                (self.xl.XSetWMHints)(self.dpy, nudge, hints);
+                (self.xl.XFree)(hints as *mut _);
+            }
+            (self.xl.XMapWindow)(self.dpy, nudge);
+            (self.xl.XFlush)(self.dpy);
+            let start = Instant::now();
+            while start.elapsed() < Duration::from_secs(1) && !self.longs(self.root, a.clients, 4096).unwrap_or_default().contains(&nudge) {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            (self.xl.XDestroyWindow)(self.dpy, nudge);
+            (self.xl.XFlush)(self.dpy);
         }
     }
 
@@ -336,7 +454,7 @@ impl X {
         let Some(comp) = &self.comp else { return };
         let mut best: Option<(c_ulong, (i32, i32), (i32, i32))> = None;
         for w in self.clients().unwrap_or_default() {
-            if self.wins.contains_key(&WindowId(w)) || !self.longs(w, self.atoms.wm_type, 16).unwrap_or_default().contains(&self.atoms.type_desktop) {
+            if self.wins.contains_key(&WindowId(w)) || !self.is_desktop(w) {
                 continue;
             }
             // SAFETY: an open display; XWindowAttributes is plain data, filled in by the call; out-pointers to locals.
@@ -577,6 +695,9 @@ impl crate::platform::Display for X {
             self.set_property(win, a.wm_state, a.atom, &[a.state_below, a.state_sticky, a.skip_taskbar, a.skip_pager]);
             self.set_property(win, a.wm_desktop, a.cardinal, &[0xFFFF_FFFF]);
             self.set_property(win, a.motif_hints, a.motif_hints, &[2, 0, 0, 0, 0]);
+            // never unredirected: a compositor that takes a window the size of the monitor out of compositing
+            // (muffin) would show it alone, over the panels and menus it draws itself
+            self.set_property(win, a.bypass, a.cardinal, &[2]);
             let name = c"retro-wall";
             (self.xl.XStoreName)(self.dpy, win, name.as_ptr());
             let mut class = xlib::XClassHint { res_name: name.as_ptr() as *mut _, res_class: name.as_ptr() as *mut _ };
@@ -623,7 +744,7 @@ impl crate::platform::Display for X {
                 self.share = ctx;
             }
             let id = WindowId(win as u64);
-            self.wins.insert(id, Win { ctx, core, place: (x, y), moved_back: 0 });
+            self.wins.insert(id, Win { ctx, core, place: (x, y), moved_back: 0, sorted: Cell::new(0) });
             Ok(id)
         }
     }
@@ -647,9 +768,49 @@ impl crate::platform::Display for X {
         }
     }
 
+    /// Among the desktop windows of its monitor, other programs' (ours, a backdrop, go under it with
+    /// `raise_under`): under Nemo's (Cinnamon's), which is see-through where composited and draws its
+    /// icons and takes its clicks over the wall; else just above the topmost other one (an opaque
+    /// desktop's, whose icons are laid over the wall); else under every window. A plain raise is left to
+    /// the window manager to keep below panels and menus, and one that does not (none running) puts the
+    /// wall over them. Nothing is sent where it already is.
     fn raise(&self, w: WindowId) {
-        // SAFETY: an open display and a window of ours.
-        unsafe { (self.xl.XRaiseWindow)(self.dpy, w.0 as c_ulong) };
+        let win = w.0 as c_ulong;
+        let Some(mine) = self.area(win) else { return };
+        let order: Vec<c_ulong> = self.stacking().into_iter().filter(|&c| c == win || !self.wins.contains_key(&WindowId(c))).collect();
+        let here: Vec<c_ulong> = order.iter().copied().filter(|&c| c != win && self.is_desktop(c) && self.area(c).is_some_and(|r| r.meets(&mine))).collect();
+        let nemo = here.iter().copied().find(|&c| self.composited() && self.class(c).as_deref() == Some("Nemo-desktop"));
+        let (sibling, mode) = match (nemo, here.last()) {
+            (Some(d), _) => (Some(d), xlib::Below),
+            (None, Some(&d)) => (Some(d), xlib::Above),
+            (None, None) => (None, xlib::Below),
+        };
+        let at = |c: c_ulong| order.iter().position(|&o| o == c);
+        let placed = match (sibling, at(win)) {
+            (Some(d), Some(i)) => at(d).is_some_and(|j| if mode == xlib::Above { i == j + 1 } else { i + 1 == j }),
+            (None, Some(i)) => i == 0,
+            (_, None) => false,
+        };
+        let Some(v) = self.wins.get(&w) else { return };
+        if !placed {
+            self.restack(win, sibling, mode);
+            v.sorted.set(0);
+        } else if let Some(n) = nemo
+            && v.sorted.replace(n) != n
+        {
+            // muffin paints its desktop windows in the order they were mapped: told, once the wall is
+            // seen in its place under this Nemo window (a window manager that does not move it, never)
+            self.sort_desktops();
+        }
+    }
+
+    fn raise_under(&self, w: WindowId, above: WindowId) {
+        let (win, wall) = (w.0 as c_ulong, above.0 as c_ulong);
+        let order = self.stacking();
+        let at = |c: c_ulong| order.iter().position(|&o| o == c);
+        if !matches!((at(win), at(wall)), (Some(i), Some(j)) if i + 1 == j) {
+            self.restack(win, Some(wall), xlib::Below);
+        }
     }
 
     fn close(&mut self, w: WindowId) {

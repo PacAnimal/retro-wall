@@ -12,7 +12,9 @@
 #   2. copies retro-wall (built: target/release/retro-wall, or a retro-wall beside this script's directory)
 #      and the themes to ~/.local/share/retro
 #   3. writes ~/.config/autostart/retro-wall.desktop, so it starts with every session; under sway or
-#      Hyprland, which do not read it, it also adds a line, marked, to the compositor's config
+#      Hyprland, which do not read it, it also adds a line, marked, to the compositor's config; under
+#      KDE Plasma, a Plasma wallpaper and a KWin script (lib/kde); where Nemo is, retro-wall to the
+#      desktops it leaves to others (lib/nemo)
 #   4. saves the desktop's wallpaper settings as they are (the first time only), draws the still
 #      picture, sets it as the desktop's wallpaper, and (re)starts retro-wall on this display
 #
@@ -95,15 +97,19 @@ say "everything it needs is installed"
 
 # --- 2. the program ----------------------------------------------------------------------------------
 
-# every directory this has to create, recorded (outermost first) so linux/uninstall can take it away
-made=()
-for dir in "$share" "$(dirname "$autostart")"; do
-	while [[ ! -d $dir ]]; do made=("$dir" ${made[@]+"${made[@]}"}); dir="$(dirname "$dir")"; done
-done
-if [[ ${#made[@]} -gt 0 ]]; then
-	mkdir -p "$share" "$(dirname "$autostart")"
+# Directories made, each one this had to create recorded (outermost first) so linux/uninstall can take it
+# away; lib/kde makes its own with it too
+make_dirs() {   # DIR...
+	local want dir made=()
+	for want in "$@"; do
+		dir=$want
+		while [[ ! -d $dir ]]; do made=("$dir" ${made[@]+"${made[@]}"}); dir="$(dirname "$dir")"; done
+	done
+	[[ ${#made[@]} -gt 0 ]] || return 0
+	mkdir -p "$@"
 	printf '%s\n' "${made[@]}" | awk '!seen[$0]++' >>"$share/created"
-fi
+}
+make_dirs "$share" "$(dirname "$autostart")"
 install -m 755 "$binary" "$share/retro-wall"
 rm -rf "$share/themes"
 cp -R "$here/themes" "$share/themes"
@@ -126,6 +132,14 @@ say "retro-wall starts at login: $autostart"
 # shellcheck source=lib/compositors
 . "$here/linux/lib/compositors"
 compositor_starts "$share"
+# Plasma's desktop over the wall: its icons and widgets shown (lib/kde)
+# shellcheck source=lib/kde
+. "$here/linux/lib/kde"
+kde_starts "$here"
+# Nemo's desktop drawn with the wall there (lib/nemo)
+# shellcheck source=lib/nemo
+. "$here/linux/lib/nemo"
+nemo_starts
 
 # --- 4. now, on this display -------------------------------------------------------------------------
 
@@ -166,6 +180,7 @@ on_this_display() {
 # the desktop's wallpaper settings as they were before the first install, for linux/uninstall to put back
 [[ -e $share/desktop-before ]] || "$share/retro-wall" --desktop save "$share/desktop-before"
 "$share/retro-wall" --wallpaper
+kde_refresh
 
 pids="$(on_this_display)"
 if [[ -n $pids ]]; then

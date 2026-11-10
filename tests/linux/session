@@ -7,13 +7,26 @@
 #      the example plugins) without a complaint, and moves on the screen; stopped, the desktop shows
 #      the still picture; a click anywhere on it goes to the desktop, past any frame the window manager
 #      put it in
-#   3. linux/install again, as an update: one retro-wall, moving again
+#   3. linux/install again, as an update: one retro-wall, moving again; then the desktop's own process
+#      (xfdesktop, pcmanfm, caja, nemo-desktop, plasmashell) started again under the running wall
 #   4. linux/uninstall: no retro-wall, the user's wallpaper on the screen, files and settings as in 1
 #
-#   tests/linux/session [xfce|kde|gnome|cinnamon|mate|lxde|sway|kde-wayland|gnome-wayland]
+# What the desktop draws over its wallpaper stays over the wall: its icons (a file on ~/Desktop), its
+# panel or bar, its widgets (Plasma's), and its right-click menu (opened on an empty part of the desktop),
+# each seen as it was over the user's own wallpaper: after the install, after the update (a wall started
+# under a running desktop), and after the desktop's process started again (a desktop started over a
+# running wall). What is seen is what the desktop draws opaque, alike over the user's wallpaper and over
+# the still picture: a shadow or a see-through label shows what is under it.
+#
+#   tests/linux/session [xfce|kde|gnome|cinnamon|mate|lxde|openbox|sway|kde-wayland|gnome-wayland|hyprland]
+#
+# openbox is a window manager alone, with a panel and feh's wallpaper: no desktop of its own, so retro-wall
+# lays its still picture under the wall itself, and openbox's own menu opens on a right-click.
 #
 # The Wayland desktops run nested on the virtual X server, as their own sessions would run them: sway, KWin
-# with plasmashell, and GNOME Shell. What they show is dumped from the X server.
+# with plasmashell, and GNOME Shell. What they show is dumped from the X server. Hyprland renders only
+# through a KMS device (no nested or software renderer of its own): it runs on one, as a login does, in a
+# virtual machine (tests/linux/vm), and its screen is taken with grim.
 # A click on the wall: on the native path, every surface has an empty input region and no seat is bound
 # (the Wayland debug log); on GNOME, which has no layer-shell, retro-wall runs through XWayland, and the
 # X11 check applies.
@@ -31,13 +44,15 @@ case $desktop in
 	cinnamon) word=X-Cinnamon ;;
 	mate) word=MATE ;;
 	lxde) word=LXDE ;;
+	openbox) word=Openbox ;;
 	sway) word=sway ;;
+	hyprland) word=Hyprland ;;
 	kde-wayland) word=KDE ;;
 	gnome-wayland) word=GNOME ;;
 	*) echo "session: no desktop $desktop" >&2; exit 2 ;;
 esac
 session_type=x11
-[[ $desktop != sway && $desktop != *-wayland ]] || session_type=wayland
+[[ $desktop != sway && $desktop != hyprland && $desktop != *-wayland ]] || session_type=wayland
 work=$(mktemp -d)
 
 Xvfb -displayfd 3 -screen 0 1280x720x24 -nolisten tcp +extension GLX 3>"$work/display" >"$work/xvfb.log" 2>&1 &
@@ -49,6 +64,12 @@ DISPLAY=":$(cat "$work/display")"
 export DISPLAY XDG_CURRENT_DESKTOP=$word XDG_SESSION_TYPE=$session_type XVFB_DISPLAY=$DISPLAY
 export XDG_RUNTIME_DIR=$work/runtime
 mkdir -m 700 "$XDG_RUNTIME_DIR"
+# Hyprland's sockets are made in a directory of their own under it, with a long name: under a short one,
+# as a login's /run/user/<uid> is, they stay within a socket path's 108 bytes
+if [[ $desktop == hyprland ]]; then
+	XDG_RUNTIME_DIR=$(mktemp -d /tmp/rt.XXXXXX)
+	trap 'kill $xvfb 2>/dev/null; rm -rf "$work" "$XDG_RUNTIME_DIR"' EXIT
+fi
 
 dbus-run-session -- bash -s "$here" "$work" "$desktop" <<'SESSION'
 set -uo pipefail
@@ -59,9 +80,16 @@ failed=0
 pass() { echo "PASS  $1"; }
 fail() { echo "FAIL  $1"; failed=1; }
 check() { local what=$1; shift; if "$@" >/dev/null 2>&1; then pass "$what"; else fail "$what"; fi; }
+screen() { "$here/screen" "$@"; }
+over() { awk -v a="$1" -v b="$2" 'BEGIN { exit !(a >= b) }'; }
 ours() { pgrep -u "$(id -u)" -f "^$share/retro-wall( |\$)"; }
 count() { ours | wc -l; }
-dump() { xwd -display "$XVFB_DISPLAY" -root -silent >"$work/$1.xwd"; }
+# the screen: the virtual X server's, or on Hyprland (on a KMS device of its own) the compositor's
+shot=xwd
+[[ $desktop != hyprland ]] || shot=png
+dump() {
+	if [[ $shot == png ]]; then grim "$work/$1.png"; else xwd -display "$XVFB_DISPLAY" -root -silent >"$work/$1.xwd"; fi
+}
 # From a Wayland debug log: how many surfaces had their input region set, failing if any of those regions
 # had something added to it before (the same region object may be added to after, as the opaque region).
 input_regions() {
@@ -89,14 +117,19 @@ wm_up() { xprop -root _NET_SUPPORTING_WM_CHECK | grep -q 'window id'; }
 gs() { gsettings set "$@"; }
 
 mine=$HOME/Pictures/mine.png
-mkdir -p "$(dirname "$mine")"
+mkdir -p "$(dirname "$mine")" "$HOME/Desktop"
 cp "$here/tests/linux/magenta.png" "$mine"
+printf 'a file on the desktop: its icon\n' >"$HOME/Desktop/notes.txt"
 
 # --- the desktop: started its own way, the user's wallpaper set, and how to read its settings
 case $desktop in
 	xfce)
 		xfwm4 >"$work/wm.log" 2>&1 &
 		xfdesktop >"$work/desktop.log" 2>&1 &
+		# the panel, from its default layout (with no config of its own it would ask which first)
+		mkdir -p "$HOME/.config/xfce4/xfconf/xfce-perchannel-xml"
+		cp /etc/xdg/xfce4/panel/default.xml "$HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml"
+		xfce4-panel >"$work/panel.log" 2>&1 &
 		until_true bash -c "$(declare -f wm_up); wm_up && pgrep -x xfdesktop"
 		sleep 2
 		for p in last-image:string:"$mine" image-style:int:3; do
@@ -107,14 +140,23 @@ case $desktop in
 	lxde)
 		openbox >"$work/wm.log" 2>&1 &
 		pcmanfm --desktop --profile LXDE >"$work/desktop.log" 2>&1 &
+		lxpanel --profile LXDE >"$work/panel.log" 2>&1 &
 		until_true bash -c "$(declare -f wm_up); wm_up && pgrep -x pcmanfm"
 		sleep 3
 		pcmanfm --set-wallpaper="$mine" --wallpaper-mode=stretch
 		settings() { cat "$HOME"/.config/pcmanfm/LXDE/desktop-items-*.conf 2>/dev/null; } ;;
+	openbox)
+		openbox >"$work/wm.log" 2>&1 &
+		lxpanel --profile LXDE >"$work/panel.log" 2>&1 &
+		until_true bash -c "$(declare -f wm_up); wm_up && pgrep -x lxpanel"
+		sleep 3
+		feh --no-fehbg --bg-scale "$mine"
+		settings() { :; } ;;
 	mate)
 		gs org.mate.background show-desktop-icons true
 		marco >"$work/wm.log" 2>&1 &
 		caja -n --force-desktop >"$work/desktop.log" 2>&1 &
+		mate-panel >"$work/panel.log" 2>&1 &
 		until_true bash -c "$(declare -f wm_up); wm_up && pgrep -x caja"
 		sleep 3
 		gs org.mate.background picture-options stretched
@@ -135,10 +177,12 @@ case $desktop in
 		cinnamon-session >"$work/desktop.log" 2>&1 &   # its settings daemon draws the wallpaper
 		until_true bash -c "$(declare -f wm_up); wm_up && xprop -root _XROOTPMAP_ID | grep -q pixmap"
 		sleep 8
-		settings() { gsettings list-recursively org.cinnamon.desktop.background | sort; } ;;
+		# with the desktops Nemo leaves to others, to which the installer adds retro-wall
+		settings() { gsettings list-recursively org.cinnamon.desktop.background | sort; gsettings get org.nemo.desktop ignored-desktop-handlers; } ;;
 	sway)
 		mkdir -p "$HOME/.config/sway"
-		printf 'output * resolution 1280x720 bg %s stretch\nxwayland enable\n' "$mine" >"$HOME/.config/sway/config"
+		printf 'output * resolution 1280x720 bg %s stretch\nxwayland enable\nbar {\n    position top\n    status_command "while echo retro-wall test; do sleep 60; done"\n}\n' "$mine" \
+			>"$HOME/.config/sway/config"
 		WLR_BACKENDS=x11 WLR_RENDERER=pixman sway >"$work/wm.log" 2>&1 &
 		socket wayland-1
 		export WAYLAND_DISPLAY=wayland-1 SWAYSOCK
@@ -146,8 +190,38 @@ case $desktop in
 		xwayland
 		sleep 2
 		settings() { :; } ;;
+	hyprland)
+		# the user's config: the monitor, Hyprland's own background in the user's colour (no wallpaper
+		# program), and a bar (opaque, so its pixels tell it is over the wall)
+		mkdir -p "$HOME/.config/hypr" "$HOME/.config/waybar"
+		printf '%s\n' 'hl.monitor({ output = "", mode = "1280x720", position = "0x0", scale = 1 })' \
+			'hl.config({ misc = { disable_hyprland_logo = true, disable_splash_rendering = true, force_default_wallpaper = 0, background_color = 0xffff00ff } })' \
+			'hl.on("hyprland.start", function () hl.exec_cmd("waybar") end)' >"$HOME/.config/hypr/hyprland.lua"
+		printf '{ "layer": "top", "position": "top", "height": 30, "modules-left": ["clock"], "clock": { "format": "retro-wall test" } }\n' \
+			>"$HOME/.config/waybar/config.jsonc"
+		printf 'window#waybar { background: #202020; color: #ffffff; font-family: DejaVu Sans; }\n' >"$HOME/.config/waybar/style.css"
+		# started as a login starts it (start-hyprland, its launcher), on the KMS device, through seatd; its
+		# socket and instance exported as its session would
+		hyprland() {
+			local before
+			before=$(ls "$XDG_RUNTIME_DIR" | grep -x 'wayland-[0-9]*')
+			env -u WAYLAND_DISPLAY -u DISPLAY LIBSEAT_BACKEND=seatd start-hyprland >>"$work/wm.log" 2>&1 &
+			until_true bash -c "ls '$XDG_RUNTIME_DIR' | grep -x 'wayland-[0-9]*' | grep -vxF '$before'"
+			WAYLAND_DISPLAY=$(ls "$XDG_RUNTIME_DIR" | grep -x 'wayland-[0-9]*' | grep -vxF "$before" | head -n 1)
+			until_true bash -c "ls '$XDG_RUNTIME_DIR/hypr'"
+			HYPRLAND_INSTANCE_SIGNATURE=$(ls -t "$XDG_RUNTIME_DIR/hypr" | head -n 1)
+			export WAYLAND_DISPLAY HYPRLAND_INSTANCE_SIGNATURE
+			until_true pgrep -u "$(id -u)" -x waybar
+			sleep 3
+		}
+		hyprland
+		echo "hyprland: $(hyprctl version | head -n 1)"
+		check "Hyprland took the user's config without an error" bash -c "[[ -z \$(hyprctl configerrors | tr -d '[:space:]') ]]"
+		settings() { :; } ;;
 	kde-wayland)
-		kwin_wayland --x11-display "$XVFB_DISPLAY" --width 1280 --height 720 --xwayland --socket wayland-k >"$work/wm.log" 2>&1 &
+		# its scripts' print() in its log, for the stacking check below
+		QT_LOGGING_RULES="kwin_scripting=true" kwin_wayland --x11-display "$XVFB_DISPLAY" --width 1280 --height 720 --xwayland \
+			--socket wayland-k >"$work/wm.log" 2>&1 &
 		socket wayland-k
 		export WAYLAND_DISPLAY=wayland-k
 		xwayland
@@ -183,6 +257,8 @@ case $desktop in
 		plasma "desktops().forEach(function (d) { d.wallpaperPlugin = 'org.kde.image';
 			d.currentConfigGroup = ['Wallpaper', 'org.kde.image', 'General'];
 			d.writeConfig('Image', 'file://$mine'); d.writeConfig('FillMode', 0); })"
+		# a widget on the desktop, clear of the icons, the panel and where the menu is opened
+		plasma "desktops()[0].addWidget('org.kde.plasma.analogclock', 900, 150, 220, 220)"
 		settings() {
 			plasma "desktops().forEach(function (d) { d.currentConfigGroup = ['Wallpaper', 'org.kde.image', 'General'];
 				print(d.wallpaperPlugin + ' ' + d.readConfig('Image') + ' ' + d.readConfig('FillMode') + '\n'); })"
@@ -204,10 +280,10 @@ record() {
 	(
 		cd "$HOME" || exit
 		find . \( -path ./.cache -o -path ./.dbus -o -path ./.local/state -o -path ./.local/share/xorg \
-			-o -path ./.config/xfce4 -o -path ./.config/dconf -o -path ./.config/pulse -o -path ./.config/caja \
+			-o -path ./.config/xfce4 -o -path ./.config/dconf -o -path ./.config/pulse -o -path ./.config/caja -o -path ./.config/nemo \
 			-o -path ./.config/mate -o -path ./.config/libfm -o -path ./.config/openbox -o -path ./.config/menus \
 			-o -path ./.cinnamon -o -path ./.config/cinnamon -o -path ./.local/share/cinnamon \
-			-o -path ./.local/share/gnome-shell -o -path ./.config/goa-1.0 -o -path ./.local/share/gvfs-metadata \
+			-o -path ./.local/share/gnome-shell -o -path ./.local/share/hyprland -o -path ./.config/goa-1.0 -o -path ./.local/share/gvfs-metadata \
 			-o -path ./.local/share/recently-used.xbel -o -path './.config/k*' -o -path './.config/plasma*' \
 			-o -path './.local/share/k*' -o -path './.local/share/plasma*' -o -path ./.local/share/baloo \
 			-o -path ./.config/Trolltech.conf -o -path ./.config/xdg-desktop-portal \) -prune -o -print0 | sort -z |
@@ -222,8 +298,35 @@ record() {
 	echo "--- wallpaper settings"
 	settings
 }
+if [[ $desktop == kde* ]]; then
+	# the panel opaque, once Plasma has made it: a translucent one shows what is under it, so its pixels
+	# could not tell it is over the wall
+	# set where Plasma keeps it (panelOpacity 1: opaque), read at its next start
+	for id in $(plasma "panels().forEach(function (p) { print(p.id + ' '); })"); do
+		kwriteconfig6 --file plasmashellrc --group PlasmaViews --group "Panel $id" --key panelOpacity 1
+	done
+	old=$(pgrep -u "$(id -u)" -x plasmashell | head -n 1)
+	setsid -f plasmashell --replace >"$work/desktop-again.log" 2>&1 </dev/null
+	until_true bash -c "! kill -0 $old"
+	until_true bash -c "$(declare -f plasma); plasma 'print(panels().length)' | grep -q '[1-9]'"
+	sleep 5
+	echo "plasma panels: $(plasma "panels().forEach(function (p) { print(p.opacity + ' '); })")"
+fi
 record >"$work/before"
 dump mine-before
+
+# the desktop's right-click menu, opened on an empty part of it, and closed again; sway and Hyprland have none
+menu_at=(420 470)
+menu() {   # NAME: the menu opened, dumped, closed; the windows before and while it is open, top first
+	xwininfo -display "$XVFB_DISPLAY" -root -tree >"$work/$1.base-windows" 2>&1
+	DISPLAY=$XVFB_DISPLAY xdotool mousemove "${menu_at[@]}" click 3
+	sleep 2
+	dump "$1"
+	xwininfo -display "$XVFB_DISPLAY" -root -tree >"$work/$1.windows" 2>&1   # which windows were there, top first
+	DISPLAY=$XVFB_DISPLAY xdotool key Escape
+	sleep 1
+}
+[[ $desktop == sway || $desktop == hyprland ]] || menu menu-before
 
 # native Wayland: the first run's protocol traffic logged, to show where its input goes (below)
 native=0
@@ -257,10 +360,43 @@ if [[ $desktop == sway ]]; then
 fi
 check "the user's config taken, nothing refused" bash -c "! grep -E 'left out|^config:|^theme:|^widget |^layout:|panicked' '$share/retro-wall.log'"
 dump live-1; sleep 1; dump live-2
+# left where it is while nothing changes: no window of its (or a frame holding one) restacked or moved
+# across two of retro-wall's looks at the stacking (every 10 seconds), as each would flash
+if [[ $native == 0 ]]; then
+	tops=$(xwininfo -root -tree | awk '
+		function level(line) { return match(line, /0x/) }
+		/^ +0x/ { if (!top_at) top_at = level($0); if (level($0) == top_at) id = $1; if (/"retro-wall"/) print id }' | sort -u)
+	timeout 22 xev -root -event substructure >"$work/restacks.log" 2>&1
+	moved=$(awk -v tops="$(echo $tops)" '
+		BEGIN { n = split(tops, t, " "); for (i = 1; i <= n; i++) ours[t[i]] = 1 }
+		/^ConfigureNotify/ { getline; w = $4; sub(/,$/, "", w); if (w in ours) count++ }   # event <root>, window <id>,
+		END { print count + 0 }' "$work/restacks.log")
+	check "installed: left where it is while nothing changes ($moved restacks of its $(wc -w <<<"$tops") windows in 22 s)" \
+		test "$moved" -eq 0 -a -n "$tops"
+fi
+[[ $desktop == sway || $desktop == hyprland ]] || menu menu-after
 case $desktop in
-	sway|kde-wayland) check "on Wayland's layer-shell" grep -q '^display: Wayland, layer-shell' "$share/retro-wall.log" ;;
+	sway|kde-wayland|hyprland) check "on Wayland's layer-shell" grep -q '^display: Wayland, layer-shell' "$share/retro-wall.log" ;;
 	gnome-wayland) check "through XWayland, as GNOME has no layer-shell" grep -q '^display: X11' "$share/retro-wall.log" ;;
 esac
+if [[ $desktop == kde-wayland ]]; then
+	# KWin's stacking, printed by a script loaded for it: retro-wall's windows (by their processes) below
+	# every desktop window (Plasma's), which then draws its icons and widgets over the wall
+	pids=$(ours | paste -sd,)
+	printf 'var pids = [%s]; print("stack-check: " + workspace.stackingOrder.map(function (w) {
+		return w.desktopWindow ? "desktop" : (String(w.resourceClass) === "retro-wall" || pids.indexOf(w.pid) >= 0) ? "wall" : "other";
+		}).join(" "));\n' "$pids" >"$work/stack.js"
+	sid=$(dbus-send --session --print-reply --dest=org.kde.KWin /Scripting org.kde.kwin.Scripting.loadScript \
+		string:"$work/stack.js" string:retro-wall-stack-check | awk '/int32/ { print $2 }')
+	dbus-send --session --print-reply --dest=org.kde.KWin "/Scripting/Script$sid" org.kde.kwin.Script.run >/dev/null
+	until_true grep -q 'stack-check: ' "$work/wm.log"
+	stack=$(grep -o 'stack-check: .*' "$work/wm.log" | tail -n 1)
+	below() { [[ $stack == *wall*desktop* && $stack != *desktop*wall* ]]; }
+	check "KWin keeps the wall below Plasma's desktop (${stack:-no stack printed})" below
+	live=$(plasma "desktops().forEach(function (d) { d.currentConfigGroup = ['Wallpaper', d.wallpaperPlugin, 'General'];
+		print(d.wallpaperPlugin + ' ' + d.readConfig('Active') + ' '); })")
+	check "Plasma's desktop is retro-wall's wallpaper, live on the wall ($live)" grep -q 'com.github.pacanimal.retrowall true' <<<"$live"
+fi
 if [[ $native == 1 ]]; then
 	# every surface's input region set empty (nothing added to the region before it is set), and no seat
 	# bound: no input comes to it
@@ -282,6 +418,42 @@ if "$here/linux/install" --no-packages; then pass "install again"; else fail "in
 sleep 8
 check "retro-wall running, once" test "$(count)" -eq 1
 dump again-1; sleep 1; dump again-2
+if [[ $desktop == hyprland ]]; then
+	# its next session (Hyprland started again, the user's config read again): the installer's line starts
+	# retro-wall in it, as the wall of the session before ended with it
+	old=$(ours | paste -sd' ')
+	pkill -u "$(id -u)" -x start-hyprland   # logged out: its launcher, then Hyprland, ended
+	pkill -u "$(id -u)" -x Hyprland
+	check "Hyprland ended" until_true bash -c "! pgrep -u $(id -u) -x Hyprland && ! pgrep -u $(id -u) -x start-hyprland"
+	check "ends when its compositor goes" until_true bash -c "[[ -z \$(pgrep -u $(id -u) -f '^$share/retro-wall( |\$)') ]]"
+	hyprland
+	new_wall() { ours | grep -vxF -f <(tr ' ' '\n' <<<"$old") | grep -q .; }
+	check "starts with a new Hyprland session, from the line in its config" until_true new_wall
+	sleep 5
+	dump login-1; sleep 1; dump login-2
+	v=$(screen differ "$work/login-1.$shot" "$work/login-2.$shot"); check "moving in the new session ($v in a second)" over "$v" 0.0005
+fi
+# the desktop's own process started again under the running wall, as a crash or an update of it would:
+# its new windows found, and its icons over the wall again (GNOME and sway draw none of their own)
+restarted=1
+case $desktop in
+	xfce) again=(xfdesktop) ;;
+	lxde) again=(pcmanfm --desktop --profile LXDE) ;;
+	mate) again=(caja -n --force-desktop) ;;
+	cinnamon) again=(nemo-desktop) ;;
+	kde|kde-wayland) again=(plasmashell) ;;
+	*) restarted=0 ;;
+esac
+if [[ $restarted == 1 ]]; then
+	echo "--- ${again[0]} started again"
+	old=$(pgrep -u "$(id -u)" -x "${again[0]}" | head -n 1)
+	kill "$old"
+	until_true bash -c "! kill -0 $old"
+	sleep 3   # a session that starts it again itself (Cinnamon's) has done so by now
+	pgrep -u "$(id -u)" -x "${again[0]}" >/dev/null || setsid -f "${again[@]}" >"$work/desktop-restart.log" 2>&1 </dev/null
+	sleep 15  # its windows made, and retro-wall's next look at the stacking (every 10 seconds) done
+	dump restarted
+fi
 cp "$share/retro-wall.log" "$work/wall-again.log"
 [[ $failed == 0 ]] || { echo "--- retro-wall.log"; cat "$share/retro-wall.log"; }
 cp "$(ls -t "$share"/wallpaper-*.png | head -n 1)" "$work/picture.png"
@@ -299,19 +471,66 @@ else
 	fail "something left (the diff above)"
 fi
 
-screen() { "$here/screen" "$@"; }
-over() { awk -v a="$1" -v b="$2" 'BEGIN { exit !(a >= b) }'; }
-v=$(screen near "$work/mine-before.xwd" '#ff00ff'); check "before: the user's wallpaper shown ($v of the screen)" over "$v" 0.6
-v=$(screen near "$work/live-1.xwd" '#ff00ff'); check "installed: the user's wallpaper gone ($v left)" over 0.02 "$v"
-v=$(screen differ "$work/live-1.xwd" "$work/live-2.xwd"); check "installed: moving over the desktop ($v in a second)" over "$v" 0.0005
-if [[ $desktop == sway ]]; then   # the wall lies over the user's wallpaper, which it leaves as it is
-	v=$(screen near "$work/still.xwd" '#ff00ff'); check "stopped: the user's background shows ($v)" over "$v" 0.6
-else
-	v=$(screen like "$work/still.xwd" "$work/picture.png"); check "stopped: the desktop shows the still picture ($v)" over "$v" 0.6
+v=$(screen near "$work/mine-before.$shot" '#ff00ff'); check "before: the user's wallpaper shown ($v of the screen)" over "$v" 0.6
+v=$(screen near "$work/live-1.$shot" '#ff00ff'); check "installed: the user's wallpaper gone ($v left)" over 0.02 "$v"
+v=$(screen differ "$work/live-1.$shot" "$work/live-2.$shot"); check "installed: moving over the desktop ($v in a second)" over "$v" 0.0005
+# what the desktop draws opaque (alike over the user's wallpaper and over the still picture), over the wall
+# as over the user's wallpaper: each icon, panel and widget on its own
+elements() {   # WHEN DUMP
+	local v
+	v=$(screen kept "$work/mine-before.$shot" '#ff00ff' "$work/$2.$shot" "$work/still.$shot")
+	check "$1: the desktop's icons, panel and widgets over the wall, as over the user's wallpaper (least kept of a part: $v)" over "$v" 0.85
+}
+elements installed live-1
+# The windows the menu opened (top-level windows new while it is open), each above every top-level window
+# that is or holds a retro-wall window (a window manager's frame), in the X server's stacking, which is
+# what shows where no compositor runs. No menu window: the menu is not an X window (GNOME's shell draws
+# its own), and the pixels alone tell. No retro-wall window found: the check fails.
+menu_stacking() {
+	awk '
+	function level(line) { return match(line, /0x/) }
+	/^ +0x/ {
+		if (!top_at) top_at = level($0)
+		if (level($0) == top_at) {
+			id = $1
+			if (FNR == NR) base[id] = 1
+			else order[++n] = id
+		} else if (FNR == NR) next
+		if (FNR != NR && /"retro-wall"/) wall[id] = 1
+	}
+	END {
+		for (i = 1; i <= n; i++) {
+			t = order[i]
+			if (t in wall) { walls = 1; continue }
+			if (!(t in base)) { found = 1; if (walls) bad = 1 }
+		}
+		print !walls ? "no retro-wall window" : found ? (bad ? "under" : "over") : "none"
+	}' "$work/menu-after.base-windows" "$work/menu-after.windows"
+}
+if [[ $desktop != sway && $desktop != hyprland ]]; then
+	stacking=$(menu_stacking)
+	[[ -n ${WAYLAND_DISPLAY:-} ]] || check "installed: the menu's windows over every retro-wall window (X stacking: $stacking)" \
+		bash -c "[[ $stacking == over || $stacking == none ]]"
+	# a menu that drew nothing but black (GTK's under Xvfb without a compositor, as LXDE runs): seen by its
+	# stacking alone, above; one that drew is seen over the wall
+	blank=$(screen drawn-as "$work/menu-before.$shot" "$work/mine-before.$shot" '#000000')
+	if over "$blank" 0.95 && [[ $stacking == over ]]; then
+		pass "installed: the desktop's right-click menu over the wall (it draws nothing here: by its stacking)"
+	else
+		v=$(screen kept "$work/menu-before.$shot" "$work/mine-before.$shot" "$work/menu-after.$shot")
+		check "installed: the desktop's right-click menu over the wall ($v of it)" over "$v" 0.9
+	fi
 fi
-v=$(screen differ "$work/again-1.xwd" "$work/again-2.xwd"); check "updated: moving again ($v in a second)" over "$v" 0.0005
-v=$(screen near "$work/mine-after.xwd" '#ff00ff'); check "uninstalled: the user's wallpaper back ($v)" over "$v" 0.6
-[[ -z ${RETRO_SHOTS:-} ]] || cp "$work"/*.xwd "$work"/*.log "$work/picture.png" "$RETRO_SHOTS/" 2>/dev/null
+if [[ $desktop == sway || $desktop == hyprland || $desktop == openbox ]]; then   # the user's wallpaper, which it leaves as it is, under it
+	v=$(screen near "$work/still.$shot" '#ff00ff'); check "stopped: the user's background shows ($v)" over "$v" 0.6
+else
+	v=$(screen like "$work/still.$shot" "$work/picture.png"); check "stopped: the desktop shows the still picture ($v)" over "$v" 0.6
+fi
+v=$(screen differ "$work/again-1.$shot" "$work/again-2.$shot"); check "updated: moving again ($v in a second)" over "$v" 0.0005
+elements updated again-1
+[[ $restarted == 0 ]] || elements "${again[0]} started again" restarted
+v=$(screen near "$work/mine-after.$shot" '#ff00ff'); check "uninstalled: the user's wallpaper back ($v)" over "$v" 0.6
+[[ -z ${RETRO_SHOTS:-} ]] || cp "$work"/*."$shot" "$work"/*.log "$work"/*.windows "$work/picture.png" "$RETRO_SHOTS/" 2>/dev/null
 exit $failed
 SESSION
 rc=$?

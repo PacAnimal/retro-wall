@@ -1,0 +1,19 @@
+{
+    "KPackageStructure": "KWin/Script",
+    "X-Plasma-API": "javascript",
+    "X-Plasma-MainScript": "code/main.js",
+    "KPlugin": {
+        "Id": "retro-wall",
+        "Name": "retro-wall",
+        "Description": "Keeps retro-wall's live wallpaper below Plasma's desktop icons and widgets.",
+        "License": "GPL-3.0-only",
+        "Version": "1.0",
+        "Authors": [
+            {
+                "Name": "PacAnimal"
+            }
+        ],
+        "Website": "https://github.com/PacAnimal/retro-wall",
+        "EnabledByDefault": true
+    }
+}

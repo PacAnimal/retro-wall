@@ -45,6 +45,13 @@ if [[ -e $share/desktop-before ]]; then
 	rm -f "$share/desktop-before"
 	say "the desktop's wallpaper settings are back as they were before installing"
 fi
+# retro-wall's Plasma wallpaper and KWin script, once the user's wallpaper is back in place
+# shellcheck source=lib/kde
+. "$here/linux/lib/kde"
+kde_stops
+# shellcheck source=lib/nemo
+. "$here/linux/lib/nemo"
+nemo_stops
 
 rm -f "$share/retro-wall" "$share/retro-wall.log" "$share"/wallpaper-*.png
 rm -rf "$share/themes" "$share/cache" "${XDG_CACHE_HOME:-$HOME/.cache}/retro-wall"   # the drawn layers, the font

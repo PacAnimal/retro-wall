@@ -1,0 +1,105 @@
+# Sourced by linux/install and linux/uninstall: under KDE Plasma, retro-wall's Plasma wallpaper and KWin
+# script (linux/kde). The script keeps the wall below Plasma's desktop, whose icons and widgets show over
+# it through that wallpaper; on Wayland retro-wall chooses that wallpaper for itself.
+#
+#   kde_starts HERE         both put where Plasma finds a user's packages (an older copy replaced), the
+#                           script enabled and loaded; the directories they need made with the
+#                           installer's make_dirs, which records them for linux/uninstall
+#   kde_stops               the script unloaded, both removed, and the script's setting with them
+#   kde_refresh             under Wayland, when the wallpaper was new: plasmashell started again once
+#                           retro-wall has chosen it, as only a desktop window made with that wallpaper
+#                           chosen can be see-through
+
+kde_wallpaper="com.github.pacanimal.retrowall"
+kde_script="retro-wall"
+kde_new=0
+
+kde_present() {
+	[[ ":${XDG_CURRENT_DESKTOP:-}:" == *:KDE:* ]] || pgrep -u "$(id -u)" -x plasmashell >/dev/null
+}
+
+# A call to KWin, done when it returns: each dbus-send is a connection of its own, and two sent without
+# waiting can arrive in either order (a reload before the unload left the script unloaded). What KWin
+# answered, on stdout.
+kde_kwin() {   # PATH METHOD [ARG]...
+	local path=$1 method=$2
+	shift 2
+	dbus-send --session --print-reply --dest=org.kde.KWin "$path" "$method" "$@" 2>/dev/null || :
+}
+
+# KWin loads or drops its scripts as kwinrc says
+kde_reconfigure() {
+	kde_kwin /KWin org.kde.KWin.reconfigure >/dev/null
+}
+
+# Where Plasma finds a user's packages: what kpackagetool6 would copy them to
+kde_dirs() {
+	local data="${XDG_DATA_HOME:-$HOME/.local/share}"
+	printf '%s\n' "wallpaper	$data/plasma/wallpapers/$kde_wallpaper" "kwin	$data/kwin/scripts/$kde_script"
+}
+
+kde_starts() {   # HERE
+	local here=$1 part dir id
+	kde_present || return 0
+	while IFS=$'\t' read -r part dir; do
+		[[ -d $dir || $part != wallpaper ]] || kde_new=1
+		make_dirs "$(dirname "$dir")"
+		rm -rf "$dir"
+		cp -R "$here/linux/kde/$part" "$dir"
+	done < <(kde_dirs)
+	if ! command -v kwriteconfig6 >/dev/null; then
+		say "KDE: no kwriteconfig6 to enable KWin script $kde_script: enable it in System Settings, KWin Scripts"
+		return 0
+	fi
+	kwriteconfig6 --file kwinrc --group Plugins --key "${kde_script}Enabled" true
+	# a running KWin loads a script only when told (kwinrc's setting counts from its next start): an older
+	# copy unloaded, this one loaded by name and run
+	kde_kwin /Scripting org.kde.kwin.Scripting.unloadScript string:"$kde_script" >/dev/null
+	dir=$(kde_dirs | awk -F'\t' '$1 == "kwin" { print $2 }')
+	id=$(kde_kwin /Scripting org.kde.kwin.Scripting.loadScript string:"$dir/contents/code/main.js" string:"$kde_script" |
+		awk '/int32/ { print $2 }')
+	if [[ -n $id && $id != -1 ]]; then
+		kde_kwin "/Scripting/Script$id" org.kde.kwin.Script.run >/dev/null
+	fi
+	kde_reconfigure
+	say "KDE: Plasma's desktop shows over the wall (its wallpaper $kde_wallpaper, KWin script $kde_script)"
+}
+
+kde_stops() {
+	local part dir removed=0
+	kde_kwin /Scripting org.kde.kwin.Scripting.unloadScript string:"$kde_script" >/dev/null
+	while IFS=$'\t' read -r part dir; do
+		if [[ -d $dir ]]; then
+			rm -rf "$dir"
+			removed=1
+		fi
+	done < <(kde_dirs)
+	[[ $removed == 1 ]] || return 0
+	if command -v kwriteconfig6 >/dev/null; then
+		kwriteconfig6 --file kwinrc --group Plugins --key "${kde_script}Enabled" --delete
+	fi
+	kde_reconfigure
+}
+
+kde_refresh() {
+	kde_present && [[ -n ${WAYLAND_DISPLAY:-} && $kde_new == 1 ]] || return 0
+	local old _
+	old=$(pgrep -u "$(id -u)" -x plasmashell | head -n 1)
+	[[ -n $old ]] || return 0
+	if systemctl --user -q is-active plasma-plasmashell.service 2>/dev/null; then
+		systemctl --user restart plasma-plasmashell.service
+	else
+		setsid -f plasmashell --replace >/dev/null 2>&1 </dev/null
+	fi
+	# the old one gone, then the new one answering: the wall is started over a desktop that is there
+	for _ in $(seq 60); do
+		kill -0 "$old" 2>/dev/null || break
+		sleep 0.5
+	done
+	for _ in $(seq 60); do
+		dbus-send --session --print-reply --dest=org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript \
+			string:'print(desktops().length)' 2>/dev/null | grep -q 'string "[1-9]' && break
+		sleep 0.5
+	done
+	say "KDE: Plasma's desktop started again, so the wall shows through it"
+}

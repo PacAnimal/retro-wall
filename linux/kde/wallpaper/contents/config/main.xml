@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- retro-wall's wallpaper settings: the still picture as org.kde.image keeps it, and whether a wall is live -->
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0 http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
+  <kcfgfile name=""/>
+  <group name="General">
+    <entry name="Image" type="String">
+      <label>file:// URL of the still picture</label>
+      <default></default>
+    </entry>
+    <entry name="FillMode" type="Int">
+      <label>How the still picture fills the screen (Qt Quick Image fill mode)</label>
+      <default>2</default>
+    </entry>
+    <entry name="Color" type="Color">
+      <label>Colour around and behind the still picture</label>
+      <default>#000000</default>
+    </entry>
+    <entry name="Active" type="Bool">
+      <label>A live wall covers this desktop's screen</label>
+      <default>false</default>
+    </entry>
+  </group>
+</kcfg>

@@ -6,9 +6,10 @@
 # from a checkout with retro-wall and the screen tool built: cargo build --release, and cargo build
 # --release --example screen (or the two programs put at the top of the checkout).
 #
-# It installs a desktop (XFCE if none is named; KDE, GNOME, Cinnamon, MATE or LXDE on Debian; on
-# Wayland, sway, KDE and GNOME on Debian), a virtual X server and xwd, and none of what retro-wall itself
-# needs, which the installer must bring.
+# It installs a desktop (XFCE if none is named; KDE, GNOME, Cinnamon, MATE, LXDE or openbox alone on
+# Debian; on Wayland, sway, KDE and GNOME on Debian, and Hyprland on Arch in a virtual machine:
+# tests/linux/vm), a virtual X server and xwd, and none of what retro-wall itself needs, which the
+# installer must bring.
 # Then it runs tests/linux/session as an ordinary user with sudo, as someone installing it on their
 # own desktop would. XFCE is tested on Debian, Ubuntu, Fedora and Arch.
 #
@@ -31,30 +32,36 @@ done
 
 if command -v apt-get >/dev/null; then
 	case $desktop in
-		xfce) pkgs="xfdesktop4 xfwm4 xfconf" ;;
+		xfce) pkgs="xfdesktop4 xfwm4 xfconf xfce4-panel" ;;
 		kde) pkgs="plasma-workspace plasma-desktop kwin-x11" ;;
-		gnome) pkgs="gnome-shell gnome-settings-daemon xdotool" ;;
-		cinnamon) pkgs="cinnamon cinnamon-session" ;;
-		mate) pkgs="caja marco mate-desktop-common" ;;
-		lxde) pkgs="pcmanfm openbox" ;;
+		gnome) pkgs="gnome-shell gnome-settings-daemon" ;;
+		cinnamon) pkgs="cinnamon cinnamon-session nemo" ;;
+		mate) pkgs="caja marco mate-desktop-common mate-panel mate-settings-daemon-common" ;;
+		lxde) pkgs="pcmanfm openbox lxpanel lxde-common" ;;
+		openbox) pkgs="openbox lxpanel lxde-common feh" ;;
 		sway) pkgs="sway swaybg xwayland" ;;
 		kde-wayland) pkgs="plasma-workspace plasma-desktop kwin-wayland xwayland" ;;
-		gnome-wayland) pkgs="gnome-shell gnome-settings-daemon xwayland xdotool" ;;
-		*) say "no desktop $desktop (xfce, kde, gnome, cinnamon, mate, lxde, sway, kde-wayland, gnome-wayland)"; exit 2 ;;
+		gnome-wayland) pkgs="gnome-shell gnome-settings-daemon xwayland" ;;
+		*) say "no desktop $desktop (xfce, kde, gnome, cinnamon, mate, lxde, openbox, sway, kde-wayland, gnome-wayland)"; exit 2 ;;
 	esac
 	export DEBIAN_FRONTEND=noninteractive
 	apt-get update -qq
 	# shellcheck disable=SC2086
-	apt-get install -y -qq --no-install-recommends $pkgs xvfb x11-apps x11-utils dbus dbus-x11 \
+	apt-get install -y -qq --no-install-recommends $pkgs xvfb x11-apps x11-utils xdotool dbus dbus-x11 \
 		libgl1-mesa-dri libglib2.0-bin sudo procps ca-certificates >/dev/null
+elif [ "$desktop" = hyprland ] && command -v pacman >/dev/null; then
+	# Hyprland on Arch, in a virtual machine (tests/linux/vm): it needs a KMS device, which a container
+	# does not have; Mesa renders on the machine's virtual one in software
+	pacman -Syu --noconfirm --needed -q hyprland waybar grim seatd mesa ttf-dejavu xorg-server-xvfb xorg-xwd \
+		xorg-xprop xorg-xwininfo xorg-xev xdotool dbus sudo procps-ng diffutils >/dev/null
 elif [ "$desktop" != xfce ]; then
-	say "$desktop is tested on Debian only"
+	say "$desktop is tested on Debian only (hyprland on Arch, in a virtual machine: tests/linux/vm)"
 	exit 2
 elif command -v dnf >/dev/null; then
-	dnf install -y -q xorg-x11-server-Xvfb xwd xprop xfdesktop xfwm4 xfconf dbus-daemon dbus-x11 \
+	dnf install -y -q xorg-x11-server-Xvfb xwd xprop xwininfo xev xdotool xfdesktop xfwm4 xfconf xfce4-panel dbus-daemon dbus-x11 \
 		mesa-dri-drivers sudo procps-ng >/dev/null
 elif command -v pacman >/dev/null; then
-	pacman -Syu --noconfirm --needed -q xorg-server-xvfb xorg-xwd xorg-xprop xfdesktop xfwm4 xfconf dbus \
+	pacman -Syu --noconfirm --needed -q xorg-server-xvfb xorg-xwd xorg-xprop xorg-xwininfo xorg-xev xdotool xfdesktop xfwm4 xfconf xfce4-panel dbus \
 		mesa sudo procps-ng diffutils >/dev/null
 else
 	say "no apt-get, dnf or pacman"
@@ -76,6 +83,13 @@ if [ -x /usr/bin/kwin_wayland ]; then cp /usr/bin/kwin_wayland /usr/local/bin/kw
 useradd -m -s /bin/bash tester
 echo 'tester ALL=(ALL) NOPASSWD: ALL' >/etc/sudoers.d/tester
 chmod 440 /etc/sudoers.d/tester
+# Hyprland takes the screen and input through seatd, as a login's seat would give them
+if [ "$desktop" = hyprland ]; then
+	groupadd -f seat
+	usermod -aG seat,video,render,input tester
+	seatd -g seat >/var/log/seatd.log 2>&1 &
+	sleep 1
+fi
 
 # the user's own copy, laid out as a release archive is, outside the home the test compares
 copy=/opt/retro-wall

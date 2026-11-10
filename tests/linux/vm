@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# The Linux install test in a throwaway virtual machine, for a desktop a container cannot run: Hyprland,
+# which renders only through a KMS device. On a Linux host with KVM:
+#
+#   tests/linux/vm [DESKTOP]        hyprland if none is named
+#
+# from a checkout built as for tests/linux/container. It boots Arch Linux's cloud image under QEMU and
+# KVM, on a copy-on-write layer of its own (the image itself is not written), with a virtio GPU (Mesa
+# renders on it in software) and QEMU's user networking (nothing on the host's network changes), and
+# runs tests/linux/container in it as root. The checkout goes in, and the result comes out, on a disk
+# image of its own, read back without mounting it (debugfs). All but the cached image is deleted after.
+#
+# Needs qemu-system-x86_64, qemu-img, xorriso, mkfs.ext4 (with -d), debugfs, curl and sha256sum. The
+# image is one release, named here with its sha256, so that a newer one is a change made here and every
+# run boots the same; it is kept in ${XDG_CACHE_HOME:-~/.cache}/retro-wall-vm.
+# RETRO_VM_TIMEOUT: seconds the machine may run (2400). With RETRO_SHOTS set to a directory, the screen
+# dumps and logs are left there. Exit status: 0 passed, 1 failed, 2 could not run.
+set -uo pipefail
+
+src=$(cd "$(dirname "$0")/../.." && pwd)
+desktop=${1:-hyprland}
+release=20261101.620452
+url=https://geo.mirror.pkgbuild.com/images/v$release/Arch-Linux-x86_64-cloudimg-$release.qcow2
+sha256=794eb4889b39e1f0ed7d5ae998b2a1ed2137db8cf8c3476cf2962c7437ecb003
+cache=${XDG_CACHE_HOME:-$HOME/.cache}/retro-wall-vm
+
+say() { printf 'vm: %s\n' "$*"; }
+die() { say "$*" >&2; exit 2; }
+
+for tool in qemu-system-x86_64 qemu-img xorriso mkfs.ext4 debugfs curl sha256sum; do
+	command -v "$tool" >/dev/null || PATH=$PATH:/usr/sbin:/sbin command -v "$tool" >/dev/null || die "no $tool"
+done
+export PATH=$PATH:/usr/sbin:/sbin
+[[ -r /dev/kvm && -w /dev/kvm ]] || die "no /dev/kvm to use"
+
+# what the test runs, as tests/linux/container finds it
+binary=$src/target/release/retro-wall
+[[ -x $binary ]] || binary=$src/retro-wall
+screen=$src/target/release/examples/screen
+[[ -x $screen ]] || screen=$src/screen
+for f in "$binary" "$screen"; do
+	[[ -x $f ]] || die "not built: $f"
+done
+
+# the image, checked against the sha256 above (a run fetching it at the same time writes a file of its own)
+image=$cache/arch-$release.qcow2
+mkdir -p "$cache"
+if [[ ! -s $image ]]; then
+	say "fetching $url"
+	part=$(mktemp -p "$cache" fetch.XXXXXX)
+	curl -fsSL -o "$part" "$url" || { rm -f "$part"; die "could not fetch the image"; }
+	mv "$part" "$image"
+fi
+echo "$sha256  $image" | sha256sum -c --quiet || die "$image is not the image named here"
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+trap 'exit 2' INT TERM
+
+# the disk it brings in: the checkout laid out as tests/linux/container wants it, and what to run
+mkdir -p "$work/payload/src/tests"
+cp "$binary" "$work/payload/src/retro-wall"
+cp "$screen" "$work/payload/src/screen"
+cp -R "$src/themes" "$src/linux" "$src/examples" "$work/payload/src/"
+cp -R "$src/tests/linux" "$work/payload/src/tests/"
+cat >"$work/payload/run" <<EOF
+#!/bin/sh
+mkdir -p /mnt/rw/out/shots
+RETRO_SHOTS=/mnt/rw/out/shots /mnt/rw/src/tests/linux/container $desktop >/mnt/rw/out/run.log 2>&1
+echo \$? >/mnt/rw/out/status
+EOF
+chmod +x "$work/payload/run"
+truncate -s 2G "$work/payload.img"
+mkfs.ext4 -q -d "$work/payload" "$work/payload.img" || die "could not make the payload disk"
+
+# cloud-init: the disk mounted, the test run, the machine off
+mkdir "$work/seed"
+printf '%s\n' '#cloud-config' 'growpart: { mode: auto, devices: ["/"] }' 'runcmd:' \
+	'  - mkdir -p /mnt/rw && mount /dev/vdb /mnt/rw && /mnt/rw/run; sync; umount /mnt/rw; poweroff' >"$work/seed/user-data"
+printf 'instance-id: retro-wall-%s\nlocal-hostname: retro-wall-test\n' "$$" >"$work/seed/meta-data"
+xorriso -as mkisofs -quiet -o "$work/seed.iso" -V cidata -J -r "$work/seed" 2>/dev/null || die "could not make the cloud-init disk"
+qemu-img create -q -f qcow2 -b "$image" -F qcow2 "$work/disk.qcow2" 12G || die "could not make the machine's disk"
+
+say "running $desktop in a virtual machine (Arch Linux, KVM)"
+timeout "${RETRO_VM_TIMEOUT:-2400}" qemu-system-x86_64 -enable-kvm -cpu host -m 4096 -smp 4 -no-reboot \
+	-drive file="$work/disk.qcow2",if=virtio -drive file="$work/payload.img",if=virtio,format=raw \
+	-cdrom "$work/seed.iso" -device virtio-vga -display none -netdev user,id=net -device virtio-net-pci,netdev=net \
+	-serial file:"$work/serial.log"
+qemu=$?
+
+debugfs -R "rdump /out $work" "$work/payload.img" >/dev/null 2>&1
+if [[ ! -s $work/out/status ]]; then
+	say "the test did not finish (qemu: $qemu); the machine's console, last lines:"
+	tail -n 30 "$work/serial.log" 2>/dev/null
+	[[ ! -f $work/out/run.log ]] || tail -n 30 "$work/out/run.log"
+	exit 2
+fi
+cat "$work/out/run.log"
+if [[ -n ${RETRO_SHOTS:-} ]]; then
+	mkdir -p "$RETRO_SHOTS" && cp -R "$work/out/shots/." "$RETRO_SHOTS/" && cp "$work/out/run.log" "$RETRO_SHOTS/"
+fi
+exit "$(cat "$work/out/status")"

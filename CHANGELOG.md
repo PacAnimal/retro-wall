@@ -3,6 +3,27 @@
 Each release, newest first. A change to an interface in "What stays stable" (`EXTENDING.md`) is said
 here with its new number.
 
+## v0.1.3
+
+- **KDE Plasma under Wayland**: Plasma's icons and widgets show over the wall. The installer adds a
+  Plasma wallpaper of retro-wall's (see-through where the wall is live, the still picture elsewhere) and
+  a KWin script that keeps the wall below Plasma's desktop (on any KWin 6), and starts
+  plasmashell again once; the uninstaller takes both out.
+- **X11**: the wall keeps itself among the desktop windows rather than raising itself, so no window
+  manager, or none at all, puts it over panels and menus; under Cinnamon it lies under Nemo's
+  see-through desktop, whose menu showed black over the wall, and makes muffin paint it there, under
+  Nemo's icons, which it hid. It asks compositors not to take it out of compositing.
+- **Cinnamon**: the installer adds retro-wall to Nemo's `org.nemo.desktop ignored-desktop-handlers`,
+  as a Nemo started after the wall (at login, or again) took it for another desktop and drew none; the
+  uninstaller takes it out.
+- The install tests check, on every desktop under X11 and Wayland, that its icons, panel, widgets and
+  right-click menu stay over the wall, as over the user's own wallpaper: each one on its own, after the
+  install, after an update, and after the desktop's own process starts again under the running wall.
+  They also check that the wall is left where it is while nothing changes, and run a window manager
+  alone (openbox), where the wall lays its own still picture under itself. Hyprland, which renders
+  only through a KMS device, is tested in a throwaway virtual machine (`tests/linux/vm`), started from
+  the line the installer adds to its config. The README has a table of every environment tested.
+
 ## v0.1.2
 
 - **Wayland.** On a compositor with layer-shell (sway, Hyprland, KDE Plasma, labwc, niri, COSMIC) the

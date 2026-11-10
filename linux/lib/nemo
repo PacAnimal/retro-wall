@@ -1,0 +1,53 @@
+# Sourced by linux/install and linux/uninstall: Nemo (Cinnamon's desktop) draws no desktop of its own when
+# it finds another program's window of type desktop, as the wall is, unless that program's WM_CLASS is in
+# its setting org.nemo.desktop ignored-desktop-handlers. A Nemo started after the wall (at login, or
+# started again) would show no icons.
+#
+#   nemo_starts     retro-wall added to that list, where Nemo is installed, and that it was added
+#                   recorded in $share/nemo-added
+#   nemo_stops      taken out again if it was added; the setting reset where only its default is left
+
+nemo_schema="org.nemo.desktop"
+nemo_key="ignored-desktop-handlers"
+nemo_class="retro-wall"
+
+# The list, one name a line, from gsettings' text ("['a', 'b']", or "@as []" when empty); names hold no
+# quote or comma
+nemo_list() {
+	gsettings get "$nemo_schema" "$nemo_key" 2>/dev/null | sed "s/^@as //; s/^\[//; s/\]$//" | tr ',' '\n' |
+		sed "s/^ *'//; s/' *$//" | grep -v '^$' || :
+}
+
+nemo_set() {   # NAME...
+	local names=() n
+	for n in "$@"; do names+=("'$n'"); done
+	gsettings set "$nemo_schema" "$nemo_key" "[$(IFS=,; echo "${names[*]}")]"
+}
+
+nemo_present() {
+	command -v gsettings >/dev/null && gsettings writable "$nemo_schema" "$nemo_key" >/dev/null 2>&1
+}
+
+nemo_starts() {
+	nemo_present || return 0
+	local list
+	mapfile -t list < <(nemo_list)
+	if ! printf '%s\n' ${list[@]+"${list[@]}"} | grep -qxF "$nemo_class"; then
+		nemo_set ${list[@]+"${list[@]}"} "$nemo_class"
+		: >"$share/nemo-added"
+	fi
+	say "Nemo draws its desktop with the wall there ($nemo_class in $nemo_schema $nemo_key)"
+}
+
+nemo_stops() {
+	[[ -e $share/nemo-added ]] || return 0
+	rm -f "$share/nemo-added"
+	nemo_present || return 0
+	local list
+	mapfile -t list < <(nemo_list | grep -vxF "$nemo_class")
+	nemo_set ${list[@]+"${list[@]}"}
+	# the default left (what gsettings reads with no setting stored): no setting stored, as before
+	if [[ $(gsettings get "$nemo_schema" "$nemo_key") == "$(GSETTINGS_BACKEND=memory gsettings get "$nemo_schema" "$nemo_key")" ]]; then
+		gsettings reset "$nemo_schema" "$nemo_key"
+	fi
+}

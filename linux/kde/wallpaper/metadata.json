@@ -1,0 +1,18 @@
+{
+    "KPackageStructure": "Plasma/Wallpaper",
+    "X-Plasma-API-Minimum-Version": "6.0",
+    "KPlugin": {
+        "Id": "com.github.pacanimal.retrowall",
+        "Name": "retro-wall",
+        "Description": "Shows retro-wall's live wallpaper through Plasma's desktop; its still picture when the wall is not running.",
+        "License": "GPL-3.0-only",
+        "Version": "1.0",
+        "Authors": [
+            {
+                "Name": "PacAnimal"
+            }
+        ],
+        "Website": "https://github.com/PacAnimal/retro-wall",
+        "Icon": "preferences-desktop-wallpaper"
+    }
+}

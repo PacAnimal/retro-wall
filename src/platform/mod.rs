@@ -139,6 +139,11 @@ impl Rect {
     pub const fn new(left: i64, top: i64, right: i64, bottom: i64) -> Rect {
         Rect { left, top, right, bottom }
     }
+
+    /// Whether the two share any area.
+    pub fn meets(&self, o: &Rect) -> bool {
+        self.left < o.right && o.left < self.right && self.top < o.bottom && o.top < self.bottom
+    }
 }
 
 /// A window of ours, as the display knows it.
@@ -177,6 +182,12 @@ pub trait Display {
     fn swap(&self, w: WindowId);
     /// To the top of the desktop's windows (still below every other).
     fn raise(&self, w: WindowId);
+    /// `w` (a backdrop) put just under `above` (its monitor's wall). Where a raise is all there is, both
+    /// are raised again, `above` last.
+    fn raise_under(&self, w: WindowId, above: WindowId) {
+        self.raise(w);
+        self.raise(above);
+    }
     fn close(&mut self, w: WindowId);
     /// The current context's renderer, as the driver names it.
     fn renderer(&self) -> String;
@@ -233,6 +244,9 @@ impl<D: Display + ?Sized> Display for Box<D> {
     }
     fn raise(&self, w: WindowId) {
         (**self).raise(w)
+    }
+    fn raise_under(&self, w: WindowId, above: WindowId) {
+        (**self).raise_under(w, above)
     }
     fn close(&mut self, w: WindowId) {
         (**self).close(w)

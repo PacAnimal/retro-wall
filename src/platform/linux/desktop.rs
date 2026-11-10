@@ -6,7 +6,7 @@
 //! | XFCE | xfconf's xfce4-desktop channel, under /backdrop, typed | xfconf-query, gdbus |
 //! | GNOME, Cinnamon, MATE | their background schema: the keys the user set | gsettings, dconf |
 //! | LXDE | pcmanfm's desktop-items files, whole | pcmanfm |
-//! | KDE Plasma | each desktop's wallpaper plugin and picture settings | qdbus or dbus-send |
+//! | KDE Plasma | each desktop's wallpaper plugin and picture settings; under Wayland retro-wall's own | qdbus or dbus-send |
 //!
 //! On wlroots compositors (sway, Hyprland) the wallpaper is a program's background-layer surface
 //! (swaybg, hyprpaper); retro-wall's lies over it, and none is set: one set while the wall runs would be a
@@ -401,6 +401,21 @@ struct Kde;
 
 const KDE_KEYS: [&str; 3] = ["Image", "FillMode", "Color"];
 
+/// retro-wall's own Plasma wallpaper (linux/kde/wallpaper), which keeps org.kde.image's keys: Plasma's
+/// desktop see-through where the wall is live under it (its KWin script keeps the wall there), the still
+/// picture elsewhere. Under Wayland the wall is a layer-shell surface that would hide Plasma's icons.
+const KDE_OURS: &str = "com.github.pacanimal.retrowall";
+
+/// The wallpaper the still picture is handed to: retro-wall's own in a Wayland session where it is
+/// installed (by linux/install), else Plasma's picture wallpaper.
+fn kde_plugin() -> &'static str {
+    let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some_and(|d| !d.is_empty());
+    let home = std::env::var_os("XDG_DATA_HOME").map(std::path::PathBuf::from).unwrap_or_else(|| crate::config::home().join(".local/share"));
+    let dirs = std::env::var("XDG_DATA_DIRS").unwrap_or_else(|_| "/usr/local/share:/usr/share".into());
+    let installed = std::iter::once(home).chain(dirs.split(':').map(std::path::PathBuf::from)).any(|d| d.join("plasma/wallpapers").join(KDE_OURS).is_dir());
+    if wayland && installed { KDE_OURS } else { "org.kde.image" }
+}
+
 /// Run a script in Plasma's shell: what it printed.
 fn kde_script(script: &str) -> Result<String, String> {
     for q in ["qdbus6", "qdbus-qt6", "qdbus", "qdbus-qt5"] {
@@ -443,17 +458,28 @@ impl Desktop for Kde {
 
     /// The desktop on the screen at the monitor's place.
     fn show(&self, s: &Screen, path: &str, colour: &str) {
+        let ours = kde_plugin();
+        let plugin = js(ours);
+        // "switched" printed where a desktop took another wallpaper type than it had
         let script = format!(
             "desktops().forEach(function (d) {{ var g = screenGeometry(d.screen); if (g.x != {} || g.y != {}) return; \
-            d.wallpaperPlugin = 'org.kde.image'; d.currentConfigGroup = ['Wallpaper', 'org.kde.image', 'General']; \
+            if (d.wallpaperPlugin != {plugin}) print('switched'); \
+            d.wallpaperPlugin = {plugin}; d.currentConfigGroup = ['Wallpaper', {plugin}, 'General']; \
             d.writeConfig('Image', {}); d.writeConfig('FillMode', 6); d.writeConfig('Color', {}); }})",
             s.x,
             s.y,
             js(&format!("file://{path}")),
             js(colour)
         );
-        if kde_script(&script).is_err() {
-            run(&["plasma-apply-wallpaperimage", path]);
+        match kde_script(&script) {
+            // retro-wall's own wallpaper just chosen: its KWin script tells it again where the wall is live
+            Ok(out) if ours == KDE_OURS && out.contains("switched") => {
+                run(&["dbus-send", "--session", "--type=method_call", "--dest=org.kde.KWin", "/KWin", "org.kde.KWin.reconfigure"]);
+            }
+            Ok(_) => {}
+            Err(_) => {
+                run(&["plasma-apply-wallpaperimage", path]);
+            }
         }
     }
 
