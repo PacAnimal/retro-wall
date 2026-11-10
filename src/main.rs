@@ -11,26 +11,27 @@ use retro_wall::platform::{Native, Platform};
 use retro_wall::{config, day, elements, font, live, sources, util};
 
 /// This display's arguments from retro-wall.conf (in the settings directory): lines of display, then
-/// arguments, a word with a space in double quotes. On Windows the display is `windows`, the line the
-/// setup program writes.
+/// arguments, a word with a space in double quotes. In a Wayland session its socket's line first
+/// (`wayland-1`), then the X display's (`:0`, XWayland's), so one line can serve both. On Windows the
+/// display is `windows`, the line the setup program writes.
 fn configured() -> Vec<String> {
     use retro_wall::setup::settings::{CONF_KEY, words};
     let key = |d: &str| {
-        if cfg!(windows) {
+        // a Wayland socket (wayland-1, or a path) as it is; an X display (:0, host:0.1, or a bare 0) as host:N.S
+        if cfg!(windows) || (!d.contains(':') && !d.bytes().all(|b| b.is_ascii_digit())) {
             return d.to_string();
         }
         let (host, rest) = d.rsplit_once(':').unwrap_or(("", d));
         format!("{host}:{}", if rest.contains('.') { rest.to_string() } else { format!("{rest}.0") })
     };
-    let display = if cfg!(windows) { CONF_KEY.to_string() } else { key(&std::env::var("DISPLAY").unwrap_or_default()) };
+    let wanted: Vec<String> = if cfg!(windows) {
+        vec![CONF_KEY.to_string()]
+    } else {
+        ["WAYLAND_DISPLAY", "DISPLAY"].iter().filter_map(|v| std::env::var(v).ok()).filter(|d| !d.is_empty()).map(|d| key(&d)).collect()
+    };
     let text = retro_wall::files::read_text(&config::config_dir().join("retro-wall.conf"), retro_wall::files::Kind::Settings).unwrap_or_default();
-    for line in text.lines() {
-        let w = words(line);
-        if !w.is_empty() && key(&w[0]) == display {
-            return w[1..].to_vec();
-        }
-    }
-    vec![]
+    let lines: Vec<Vec<String>> = text.lines().map(words).filter(|w| !w.is_empty()).collect();
+    wanted.iter().find_map(|d| lines.iter().find(|w| key(&w[0]) == *d)).map(|w| w[1..].to_vec()).unwrap_or_default()
 }
 
 fn usage(why: &str) -> ! {

@@ -9,7 +9,8 @@ One Rust binary. It draws on the GPU (OpenGL 3.3, or 2.1 on older hardware), pre
 something in it changed, and stops while the picture is covered or the machine is on battery.
 
 [![test](https://github.com/PacAnimal/retro-wall/actions/workflows/test.yml/badge.svg)](https://github.com/PacAnimal/retro-wall/actions/workflows/test.yml)
-![Linux](https://img.shields.io/badge/Linux-XFCE%20%7C%20KDE%20%7C%20GNOME%20%7C%20Cinnamon%20%7C%20MATE%20%7C%20LXDE-e8813a)
+![Linux X11](https://img.shields.io/badge/Linux%20X11-XFCE%20%7C%20KDE%20%7C%20GNOME%20%7C%20Cinnamon%20%7C%20MATE%20%7C%20LXDE-e8813a)
+![Linux Wayland](https://img.shields.io/badge/Linux%20Wayland-sway%20%7C%20Hyprland%20%7C%20KDE%20%7C%20GNOME-e8813a)
 ![macOS](https://img.shields.io/badge/macOS-Apple%20silicon-e8813a)
 ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-e8813a)
 ![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-e8813a)
@@ -108,7 +109,8 @@ Each [release](https://github.com/PacAnimal/retro-wall/releases/latest) has an a
 installer. Unpack it and run the installer as yourself, not as
 an administrator. Running it again updates; the uninstaller puts the desktop's own wallpaper back.
 
-**Linux** (X11: XFCE, KDE Plasma, GNOME, Cinnamon, MATE, LXDE, or a window manager alone; glibc 2.35 or
+**Linux** (Wayland: sway, Hyprland, KDE Plasma, GNOME, and any compositor with layer-shell; X11: XFCE,
+KDE Plasma, GNOME, Cinnamon, MATE, LXDE, or a window manager alone; glibc 2.35 or
 newer: Debian 12, Ubuntu 22.04 and later):
 
 ```sh
@@ -116,6 +118,16 @@ tar xzf retro-wall-VERSION-linux-x86_64.tar.gz && cd retro-wall-VERSION-linux-x8
 linux/install                 # libraries if missing, ~/.local/share/retro, starts at login and now
 linux/uninstall               # back as it was
 ```
+
+On **Wayland** the wall is a surface on each monitor's background layer (wlr-layer-shell): below every
+window, on every workspace, with no input of its own, drawn at the monitor's own pixels at any scale. It
+lies over the compositor's wallpaper (swaybg, hyprpaper) and leaves it as it is. Under sway and
+Hyprland, which start no autostart entries, the installer adds one marked line to the compositor's
+config, and the uninstaller takes it out. GNOME has no layer-shell: there the wall runs through
+XWayland, as GNOME's own desktop icons do. `RETRO_BACKEND=x11` or `=wayland` chooses for yourself.
+Wayland does not tell a program where the panels are: give their room with `--reserve-top` and the
+like. On KDE Plasma under Wayland the wall lies over Plasma's own desktop, so its icons and widgets
+are not seen (a click still reaches them); under X11 they show over the wall.
 
 **macOS** (11 or later):
 
@@ -205,7 +217,8 @@ retro-wall --help                            # every option
 ```
 
 Options for the autostarted instance go in `~/.config/retro/retro-wall.conf`, one line per display:
-`:0.0  --theme winter --battery --pause-screen-off`. The theme, the instruments' layout and plugin
+`:0.0  --theme winter --battery --pause-screen-off`. In a Wayland session the line of its socket comes
+first (`wayland-1  --theme winter`), then the X display's. The theme, the instruments' layout and plugin
 sources go in `~/.config/retro/retro.toml`.
 
 Themes: `phosphor` (the default), `neon_rain`, `night_city`, `aurora`, `winter`, `matrix`, `guybrush`,
@@ -238,7 +251,8 @@ Without them they are skipped.
 `RETRO_BLESS=1 cargo test --release --test gl` writes the reference pictures again;
 `RETRO_TEST_FULL=1` runs every limit case, not a sample. The install test runs a desktop in a
 container: `docker run --rm -v "$PWD:/src:ro" debian:trixie /src/tests/linux/container xfce` (after
-`cargo build --release --example screen`). CI (`.github/workflows/`) runs all of it, and builds for
+`cargo build --release --example screen`); `sway`, `kde-wayland` and `gnome-wayland` run the Wayland
+desktops, nested on a virtual X server. CI (`.github/workflows/`) runs all of it, and builds for
 macOS and Windows. A `v*` tag on a commit whose tests passed makes a release, its notes from
 `CHANGELOG.md`.
 

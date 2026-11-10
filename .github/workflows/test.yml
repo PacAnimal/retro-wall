@@ -1,6 +1,6 @@
 # Lint and test on Linux; check the dependencies, and the build on the oldest Rust it supports; build
 # for macOS and Windows and run the Windows exe; install and uninstall in containers of the Linux
-# desktops. Nightly, the limit tests run every case (RETRO_TEST_FULL).
+# desktops, X11 and Wayland. Nightly, the limit tests run every case (RETRO_TEST_FULL).
 name: test
 
 on:
@@ -116,6 +116,10 @@ jobs:
           - { image: "debian:trixie", desktop: cinnamon }
           - { image: "debian:trixie", desktop: mate }
           - { image: "debian:trixie", desktop: lxde }
+          # Wayland: native layer-shell on sway and KDE; GNOME, which has none, through XWayland
+          - { image: "debian:trixie", desktop: sway }
+          - { image: "debian:trixie", desktop: kde-wayland }
+          - { image: "debian:trixie", desktop: gnome-wayland }
     name: install (${{ matrix.desktop }}, ${{ matrix.image }})
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

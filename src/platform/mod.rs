@@ -206,6 +206,63 @@ pub trait Display {
     }
 }
 
+/// A display chosen at run time (Linux: Wayland's or X11's), used as the one it holds. Every method is
+/// forwarded, those with a default too: a method added to `Display` is added here, or the boxed display
+/// answers with the default in place of its own.
+impl<D: Display + ?Sized> Display for Box<D> {
+    fn screens(&self) -> Vec<Screen> {
+        (**self).screens()
+    }
+    fn work_edges(&self, s: &Screen) -> Edges {
+        (**self).work_edges(s)
+    }
+    fn window(&mut self, x: i32, y: i32, w: i32, h: i32) -> Result<WindowId, String> {
+        (**self).window(x, y, w, h)
+    }
+    fn still_window(&mut self, x: i32, y: i32, w: i32, h: i32, rgba: &[u8]) -> Result<WindowId, String> {
+        (**self).still_window(x, y, w, h, rgba)
+    }
+    fn core(&self, w: WindowId) -> bool {
+        (**self).core(w)
+    }
+    fn make_current(&mut self, w: WindowId) {
+        (**self).make_current(w)
+    }
+    fn swap(&self, w: WindowId) {
+        (**self).swap(w)
+    }
+    fn raise(&self, w: WindowId) {
+        (**self).raise(w)
+    }
+    fn close(&mut self, w: WindowId) {
+        (**self).close(w)
+    }
+    fn renderer(&self) -> String {
+        (**self).renderer()
+    }
+    fn events(&mut self) -> Vec<WindowId> {
+        (**self).events()
+    }
+    fn wait(&self, timeout: Duration) {
+        (**self).wait(timeout)
+    }
+    fn covering(&self) -> Option<Vec<Rect>> {
+        (**self).covering()
+    }
+    fn screen_off(&self) -> bool {
+        (**self).screen_off()
+    }
+    fn wallpaper_hidden(&self) -> bool {
+        (**self).wallpaper_hidden()
+    }
+    fn desktop_drawn(&mut self) -> Option<Vec<Rect>> {
+        (**self).desktop_drawn()
+    }
+    fn desktop_pixels(&self, x: i32, y: i32, w: i32, h: i32) -> Option<Vec<[u8; 3]>> {
+        (**self).desktop_pixels(x, y, w, h)
+    }
+}
+
 /// The machine and its desktop.
 pub trait Platform {
     type Display: Display;

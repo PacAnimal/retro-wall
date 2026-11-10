@@ -12,7 +12,7 @@ nothing between frames.
 | `scene.rs` | `Part` trait; the scene compiler: still passes painted once into layers, runs of layers between live passes merged into one texture, empty runs dropped. `compose()` draws the still picture. A part draws in the look its `Geo` carries; it adds its pictures to `Uploads` and keeps their handles |
 | `gfx.rs` | The renderer: one vertex stream a frame, a draw per run of quads with the same texture, blend, clip and mask (a second texture's alpha, a tank's window). Small filtered pictures go up packed onto pages (`Uploads::add_packed`), so many of them are one draw: a draw costs a small processor's driver far more than its pixels. New pixels of a texture's size go into the storage it has. A table a shader reads every frame can go up as a vec4 array uniform (`Gfx::uniform_array`, where `uniform_room` allows), far cheaper for a driver than a texture changed each frame. OpenGL 3.3 core, or 2.1 where the driver has no more |
 | `live.rs` | The frame loop: one window per monitor driven (one, or `--all-monitors` as they come and go), the header placed by `[monitors]`, pausing (battery, screen off, VNC viewer), covered-monitor detection, `--snapshot`. The look is chosen here and handed to each monitor's scene |
-| `platform/` | Everything system-specific, behind `Platform` (the machine: power, counters, addresses, the desktop), `Display` (monitors, windows and GL contexts, events, coverage, screen off) and `Desktop` (a desktop environment's wallpaper settings). `platform/linux/`: X11 and GLX, `/proc` and `/sys`, the desktops' own tools; `platform/macos/`: Cocoa and NSOpenGL, Mach, sysctl and IOKit, NSWorkspace. `platform/unix.rs`: what Linux and macOS read alike through POSIX. Each platform's `impl Platform` takes the machine's readings from its `system` module (`readings_from_system!`). `platform/windows/`: Win32 and WGL (windows behind the desktop icons, in Explorer's WorkerW), the system's counters, the wallpaper through SystemParametersInfo |
+| `platform/` | Everything system-specific, behind `Platform` (the machine: power, counters, addresses, the desktop), `Display` (monitors, windows and GL contexts, events, coverage, screen off) and `Desktop` (a desktop environment's wallpaper settings). `platform/linux/`: Wayland's layer-shell and EGL (`wayland.rs`; libwayland and libEGL opened at run time), else X11 and GLX (GNOME's Wayland, which has no layer-shell, through XWayland), chosen at start behind a boxed `Display`; `/proc` and `/sys`; the desktops' own tools; `platform/macos/`: Cocoa and NSOpenGL, Mach, sysctl and IOKit, NSWorkspace. `platform/unix.rs`: what Linux and macOS read alike through POSIX. Each platform's `impl Platform` takes the machine's readings from its `system` module (`readings_from_system!`). `platform/windows/`: Win32 and WGL (windows behind the desktop icons, in Explorer's WorkerW), the system's counters, the wallpaper through SystemParametersInfo |
 | `trace/` | Scenes traced on the CPU, for an element that draws a world of its own in 3D (`elements/blocks/` is one): the camera, rays and boxes, models of hinged boxes, and what moves over a picture traced once. See "Traced scenes" |
 | `still.rs` | The still picture, handed to the desktop or shown in a window of our own |
 | `sources/`, `plugins.rs` | Readings: built-in sources on a thread; plugin sources and faces as child processes speaking JSON lines |
@@ -81,6 +81,36 @@ A theme's `shader` element is written once in GLSL 1.20 and runs on both profile
 - The allocator: glibc's mmap threshold is fixed, so a screen-sized picture is given back when it is
   freed, and the heap is trimmed after a monitor's scene is built. On macOS a large picture has a
   mapping of its own: the system allocator keeps a large block it is given back in the footprint.
+
+## Wayland
+
+- **Native where the compositor has wlr-layer-shell** (sway, Hyprland, KDE's KWin, labwc, niri, COSMIC;
+  sway and KWin in the install tests):
+  one layer surface per monitor on the background layer, namespace `wallpaper`, anchored to all edges,
+  exclusive zone -1 (under the panels too), no keyboard, an empty input region (clicks go past it) and
+  an opaque one (nothing under it is drawn). Its buffer is the monitor's pixels, scaled to the
+  output's logical size by a viewport (wp_viewporter, which every compositor with layer-shell has; one
+  without is left to X11), so any scale, fractional too, is sharp.
+- **A screen per output**: its corner the output's logical position, its size the output's pixels.
+  A window is found its output by that corner, never by area: on a scaled output the two differ in
+  kind. An output is reported once its description is done (wl_output.done).
+- **EGL**: the platform display (EGL_PLATFORM_WAYLAND_KHR), a config without alpha, 3.3 core else
+  2.1, one context per surface sharing objects, swap interval 0: a swap never waits on the compositor.
+- **The live window draws all of each monitor** (`Display::wallpaper_hidden`): a compositor does not
+  show a client's picture as its wallpaper, and a newer surface would be stacked over the wall. The
+  user's wallpaper program (swaybg, hyprpaper) stays as it is, under the wall.
+- **Covered**: Wayland tells a client nothing of other windows. A surface the compositor does not show
+  gets no frame callbacks: one overdue counts as covered, and the frame loop pauses it. The callback
+  stays asked for and comes when the surface is shown again; a surface that draws nothing asks for one
+  every second.
+- **Outputs** come and go through the registry; xdg-output gives each its logical place and name. A
+  wallpaper the compositor closes (layer_surface.closed) takes its output out of the screens until the
+  frame loop has closed it, so the loop makes it again.
+- **The connection gone** (the compositor ended, a protocol error) ends retro-wall, as on X11.
+- **KDE Plasma**: the wall and Plasma's desktop share KWin's desktop layer, the newer on top: the wall
+  covers Plasma's icons and widgets, which take clicks through it.
+- **GNOME** has no layer-shell: the wall runs through XWayland, where Mutter keeps an X11 window of type
+  desktop under the others.
 
 ## Windows
 

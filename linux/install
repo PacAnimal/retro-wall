@@ -1,20 +1,23 @@
 #!/usr/bin/env bash
-# Install retro-wall's live wallpaper for the user running it, on Linux: X11, under XFCE, KDE Plasma,
-# GNOME, Cinnamon, MATE or LXDE, or a window manager alone.
+# Install retro-wall's live wallpaper for the user running it, on Linux: Wayland (sway, Hyprland, KDE
+# Plasma, GNOME, and any compositor with layer-shell) or X11 (XFCE, KDE Plasma, GNOME, Cinnamon, MATE,
+# LXDE, or a window manager alone).
 #
 #   linux/install [--no-packages]
 #
 # Run it as yourself, inside your desktop session, from a checkout of this repository. It:
 #
-#   1. installs the libraries retro-wall needs (cairo, fontconfig, OpenGL, X11), through sudo and
+#   1. installs the libraries retro-wall needs (cairo, fontconfig, OpenGL, X11, Wayland), through sudo and
 #      apt, dnf or pacman, unless --no-packages is given or all of it is there
 #   2. copies retro-wall (built: target/release/retro-wall, or a retro-wall beside this script's directory)
 #      and the themes to ~/.local/share/retro
-#   3. writes ~/.config/autostart/retro-wall.desktop, so it starts with every session
+#   3. writes ~/.config/autostart/retro-wall.desktop, so it starts with every session; under sway or
+#      Hyprland, which do not read it, it also adds a line, marked, to the compositor's config
 #   4. saves the desktop's wallpaper settings as they are (the first time only), draws the still
 #      picture, sets it as the desktop's wallpaper, and (re)starts retro-wall on this display
 #
-# Run outside a session (no DISPLAY), it does 1 to 3, and retro-wall starts at your next login.
+# Run outside a session (no WAYLAND_DISPLAY or DISPLAY), it does 1 to 3, and retro-wall starts at your
+# next login.
 # Re-running it is how you update: it installs this checkout's version and restarts it.
 # Options for retro-wall go in ~/.config/retro/retro-wall.conf (see the README), which this never touches.
 set -euo pipefail
@@ -49,7 +52,8 @@ missing() {
 	local lib libs ldconfig
 	ldconfig="$(PATH="$PATH:/usr/sbin:/sbin" command -v ldconfig || :)"   # outside a user's PATH on some systems
 	libs="$([[ -n $ldconfig ]] && "$ldconfig" -p 2>/dev/null || :)"
-	for lib in libcairo.so.2 libfontconfig.so.1 libGL.so.1 libX11.so.6 libXext.so.6 libXfixes.so.3 libXrandr.so.2; do
+	for lib in libcairo.so.2 libfontconfig.so.1 libGL.so.1 libX11.so.6 libXext.so.6 libXfixes.so.3 libXrandr.so.2 \
+		libEGL.so.1 libwayland-client.so.0 libwayland-egl.so.1; do
 		grep -q "$lib" <<<"$libs" || echo "$lib"
 	done
 	[[ $xfce == 0 ]] || command -v xfconf-query >/dev/null || echo "xfconf-query"
@@ -60,17 +64,17 @@ install_packages() {
 	local sudo=() pkgs
 	[[ $EUID -eq 0 ]] || sudo=(sudo)
 	if command -v apt-get >/dev/null; then
-		pkgs=(libcairo2 libgl1 libx11-6 libxext6 libxfixes3 libxrandr2 libfontconfig1)
+		pkgs=(libcairo2 libgl1 libx11-6 libxext6 libxfixes3 libxrandr2 libfontconfig1 libegl1 libwayland-client0 libwayland-egl1)
 		[[ $xfce == 0 ]] || pkgs+=(xfconf libglib2.0-bin)
 		say "installing ${pkgs[*]}"
 		"${sudo[@]}" env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${pkgs[@]}"
 	elif command -v dnf >/dev/null; then
-		pkgs=(cairo mesa-libGL libX11 libXext libXfixes libXrandr fontconfig)
+		pkgs=(cairo mesa-libGL libX11 libXext libXfixes libXrandr fontconfig mesa-libEGL libwayland-client libwayland-egl)
 		[[ $xfce == 0 ]] || pkgs+=(xfconf glib2)
 		say "installing ${pkgs[*]}"
 		"${sudo[@]}" dnf install -y "${pkgs[@]}"
 	elif command -v pacman >/dev/null; then
-		pkgs=(cairo libglvnd libx11 libxext libxfixes libxrandr fontconfig)
+		pkgs=(cairo libglvnd libx11 libxext libxfixes libxrandr fontconfig wayland)
 		[[ $xfce == 0 ]] || pkgs+=(xfconf glib2)
 		say "installing ${pkgs[*]}"
 		"${sudo[@]}" pacman -S --needed --noconfirm "${pkgs[@]}"
@@ -117,27 +121,44 @@ X-XFCE-Autostart-Override=true
 EOF
 say "retro-wall starts at login: $autostart"
 
+# sway and Hyprland start no XDG autostart entry: a line in their own config starts it, marked so that
+# linux/uninstall takes out exactly what was added (lib/compositors)
+# shellcheck source=lib/compositors
+. "$here/linux/lib/compositors"
+compositor_starts "$share"
+
 # --- 4. now, on this display -------------------------------------------------------------------------
 
-if [[ -z ${DISPLAY:-} ]]; then
-	say "no DISPLAY: not in a session, so it starts at your next login"
+session="${WAYLAND_DISPLAY:-${DISPLAY:-}}"
+if [[ -z $session ]]; then
+	say "no WAYLAND_DISPLAY or DISPLAY: not in a session, so it starts at your next login"
 	exit 0
 fi
 desktop="$("$share/retro-wall" --desktop which)"
 if [[ -n $desktop ]]; then
 	say "the desktop is $desktop: the still picture is set as its wallpaper"
+elif [[ -n ${WAYLAND_DISPLAY:-} ]]; then
+	say "Wayland: retro-wall draws over the compositor's own wallpaper, which it leaves as it is"
 else
 	say "no desktop of its own is drawing a wallpaper: retro-wall shows the still picture itself"
 fi
 
-# This display's instances only: one user can have a session on more than one display.
-display_key() { local d="${1#*:}"; [[ $d == *.* ]] || d="$d.0"; printf '%s\n' "$d"; }
-this="$(display_key "$DISPLAY")"
+# This session's instances only: one user can have a session on more than one display. A session is
+# its Wayland socket, or its X display (screen .0 where none is named).
+session_key() {   # <WAYLAND_DISPLAY> <DISPLAY>
+	local d="${2#*:}"
+	if [[ -n $1 ]]; then printf 'wayland %s\n' "$1"; return; fi
+	[[ $d == *.* ]] || d="$d.0"
+	printf 'x %s\n' "$d"
+}
+this="$(session_key "${WAYLAND_DISPLAY:-}" "${DISPLAY:-}")"
 on_this_display() {
-	local pid d
+	local pid env w d
 	for pid in $(pgrep -u "$(id -u)" -f "^$share/retro-wall( |\$)"); do
-		d="$(tr '\0' '\n' </proc/"$pid"/environ 2>/dev/null | sed -n 's/^DISPLAY=//p')"
-		[[ -n $d && $(display_key "$d") == "$this" ]] && echo "$pid"
+		env="$(tr '\0' '\n' </proc/"$pid"/environ 2>/dev/null)" || continue
+		w="$(sed -n 's/^WAYLAND_DISPLAY=//p' <<<"$env")"
+		d="$(sed -n 's/^DISPLAY=//p' <<<"$env")"
+		[[ -n $w$d && $(session_key "$w" "$d") == "$this" ]] && echo "$pid"
 	done
 	return 0
 }
@@ -154,7 +175,7 @@ fi
 setsid "$share/retro-wall" >"$share/retro-wall.log" 2>&1 </dev/null &
 sleep 3
 if [[ -n $(on_this_display) ]]; then
-	say "retro-wall is running on $DISPLAY (log: $share/retro-wall.log)"
+	say "retro-wall is running on $session (log: $share/retro-wall.log)"
 elif grep -q "software OpenGL" "$share/retro-wall.log" 2>/dev/null; then
 	say "this display has no hardware OpenGL, so it shows the still picture only (see the README, --software)"
 else

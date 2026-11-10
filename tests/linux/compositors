@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# linux/lib/compositors, as linux/install and linux/uninstall use it: for sway and Hyprland (its Lua
+# config, else its old one) the line that starts retro-wall is added once, and taken out again with
+# each file as it was, byte for byte; a sway config it had to write is removed whole. A compositor's config
+# that is there gets the line under another desktop too, so the wall starts when that compositor is used.
+# Exit status: 0 passed, 1 failed.
+set -uo pipefail
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+failed=0
+say() { :; }
+pgrep() { return 1; }        # no compositor runs here: each case says which one through XDG_CURRENT_DESKTOP
+# shellcheck source=../../linux/lib/compositors
+. "$here/linux/lib/compositors"
+
+# case_ NAME DESKTOP FILE EXPECT [PATH=CONTENT]...: a fresh home with the files given (\n for a newline;
+# PATH=@TARGET a link to TARGET), installed, installed again, and uninstalled; FILE must hold a line
+# matching EXPECT once in between. With $between set, it runs between install and uninstall, and $after
+# is what FILE must then hold, else its files are as before.
+case_() {
+	local name=$1 desktop=$2 file=$3 expect=$4; shift 4
+	export HOME=$work/$name XDG_CURRENT_DESKTOP=$desktop
+	local share=$HOME/.local/share/retro
+	mkdir -p "$share"
+	local f
+	for f in "$@"; do
+		mkdir -p "$(dirname "$HOME/${f%%=*}")"
+		if [[ ${f#*=} == @* ]]; then ln -s "$HOME/${f#*=@}" "$HOME/${f%%=*}"; else printf '%b' "${f#*=}" >"$HOME/${f%%=*}"; fi
+	done
+	(cd "$HOME" && find . -type f ! -path './.local/*' -exec cksum {} + | sort) >"$work/$name.before"
+	compositor_starts "$share"
+	compositor_starts "$share"
+	local n=0
+	n=$(grep -c -- "$expect" "$HOME/$file" 2>/dev/null)
+	if [[ $n != 1 ]]; then echo "FAIL  $name: $file holds the line $n times"; failed=1; fi
+	[[ -z ${between:-} ]] || (cd "$HOME" && eval "$between")
+	compositor_stops "$share"
+	if [[ -n ${between:-} ]]; then
+		if [[ $(printf '%b' "$after") == "$(cat "$HOME/$file")" && $(tail -c 1 "$HOME/$file" | od -An -c | tr -d ' ') == "$(printf '%b' "$after" | tail -c 1 | od -An -c | tr -d ' ')" ]]; then
+			echo "PASS  $name"
+		else
+			echo "FAIL  $name: $file is"; cat -A "$HOME/$file"; failed=1
+		fi
+		between="" after=""
+		return
+	fi
+	(cd "$HOME" && find . -type f ! -path './.local/*' -exec cksum {} + | sort) >"$work/$name.after"
+	if diff -q "$work/$name.before" "$work/$name.after" >/dev/null && [[ ! -e $HOME/.config/sway || -n $(ls -A "$HOME/.config/sway") ]]; then
+		echo "PASS  $name"
+	else
+		echo "FAIL  $name: not as before"; diff "$work/$name.before" "$work/$name.after"; failed=1
+	fi
+}
+
+sway_line='^exec ".*/retro-wall" # retro-wall:'
+case_ sway sway .config/sway/config "$sway_line" '.config/sway/config=output * bg x.png fill\n'
+case_ sway-no-newline sway .config/sway/config "$sway_line" '.config/sway/config=output * bg x.png fill'
+case_ sway-no-config sway .config/sway/config "$sway_line"
+case_ sway-config-a-link sway .config/sway/config "$sway_line" 'dotfiles/sway=output * bg x.png fill\n' '.config/sway/config=@dotfiles/sway'
+[[ -L $work/sway-config-a-link/.config/sway/config ]] || { echo "FAIL  sway-config-a-link: no longer a link"; failed=1; }
+case_ hyprland-lua Hyprland .config/hypr/hyprland.lua "hl.exec_cmd(\"'.*/retro-wall'\") end) -- retro-wall:" \
+	'.config/hypr/hyprland.lua=hl.monitor({ output = "" })\n' '.config/hypr/hyprland.conf=monitor = , preferred, auto, 1\n'
+case_ hyprland-conf Hyprland .config/hypr/hyprland.conf "^exec-once = '.*/retro-wall' # retro-wall:" '.config/hypr/hyprland.conf=monitor = , preferred, auto, 1\n'
+case_ xfce-with-sway-config XFCE .config/sway/config "$sway_line" '.config/sway/config=output * bg x.png fill\n'
+# written here, then changed by the user: only the line comes out
+between='printf "bindsym Mod4+t exec foot\n" >>.config/sway/config' after='include /etc/sway/config\nbindsym Mod4+t exec foot\n' \
+	case_ sway-written-then-changed sway .config/sway/config "$sway_line"
+# a line of the user's after ours, with no newline at its end: the user's last character stays
+between='printf "bindsym Mod4+t exec foot" >>.config/sway/config' after='output * bg x.png fill\nbindsym Mod4+t exec foot' \
+	case_ sway-user-line-after-ours sway .config/sway/config "$sway_line" '.config/sway/config=output * bg x.png fill'
+exit $failed

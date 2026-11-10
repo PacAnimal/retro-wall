@@ -10,7 +10,13 @@
 #   3. linux/install again, as an update: one retro-wall, moving again
 #   4. linux/uninstall: no retro-wall, the user's wallpaper on the screen, files and settings as in 1
 #
-#   tests/linux/session [xfce|kde|gnome|cinnamon|mate|lxde]
+#   tests/linux/session [xfce|kde|gnome|cinnamon|mate|lxde|sway|kde-wayland|gnome-wayland]
+#
+# The Wayland desktops run nested on the virtual X server, as their own sessions would run them: sway, KWin
+# with plasmashell, and GNOME Shell. What they show is dumped from the X server.
+# A click on the wall: on the native path, every surface has an empty input region and no seat is bound
+# (the Wayland debug log); on GNOME, which has no layer-shell, retro-wall runs through XWayland, and the
+# X11 check applies.
 #
 # tests/linux/container runs it in a fresh container. With RETRO_SHOTS set to a directory, the screen
 # dumps and logs are left there. Exit status: 0 passed, 1 failed, 2 could not run.
@@ -25,8 +31,13 @@ case $desktop in
 	cinnamon) word=X-Cinnamon ;;
 	mate) word=MATE ;;
 	lxde) word=LXDE ;;
+	sway) word=sway ;;
+	kde-wayland) word=KDE ;;
+	gnome-wayland) word=GNOME ;;
 	*) echo "session: no desktop $desktop" >&2; exit 2 ;;
 esac
+session_type=x11
+[[ $desktop != sway && $desktop != *-wayland ]] || session_type=wayland
 work=$(mktemp -d)
 
 Xvfb -displayfd 3 -screen 0 1280x720x24 -nolisten tcp +extension GLX 3>"$work/display" >"$work/xvfb.log" 2>&1 &
@@ -35,7 +46,7 @@ trap 'kill $xvfb 2>/dev/null; rm -rf "$work"' EXIT
 for _ in $(seq 100); do [[ -s $work/display ]] && break; sleep 0.1; done
 [[ -s $work/display ]] || { echo "session: Xvfb did not start" >&2; cat "$work/xvfb.log" >&2; exit 2; }
 DISPLAY=":$(cat "$work/display")"
-export DISPLAY XDG_CURRENT_DESKTOP=$word XDG_SESSION_TYPE=x11
+export DISPLAY XDG_CURRENT_DESKTOP=$word XDG_SESSION_TYPE=$session_type XVFB_DISPLAY=$DISPLAY
 export XDG_RUNTIME_DIR=$work/runtime
 mkdir -m 700 "$XDG_RUNTIME_DIR"
 
@@ -50,7 +61,29 @@ fail() { echo "FAIL  $1"; failed=1; }
 check() { local what=$1; shift; if "$@" >/dev/null 2>&1; then pass "$what"; else fail "$what"; fi; }
 ours() { pgrep -u "$(id -u)" -f "^$share/retro-wall( |\$)"; }
 count() { ours | wc -l; }
-dump() { xwd -root -silent >"$work/$1.xwd"; }
+dump() { xwd -display "$XVFB_DISPLAY" -root -silent >"$work/$1.xwd"; }
+# From a Wayland debug log: how many surfaces had their input region set, failing if any of those regions
+# had something added to it before (the same region object may be added to after, as the opaque region).
+input_regions() {
+	awk '
+	function id(s) { sub(/.*wl_region[@#]/, "", s); sub(/[^0-9].*/, "", s); return s }
+	/-> wl_region[@#][0-9]+\.add\(/ { added[id($0)] = 1 }
+	/-> wl_surface[@#][0-9]+\.set_input_region\(wl_region/ { n++; if (added[id($0)]) bad++ }
+	END { print n + 0; exit bad > 0 }' "$1"
+}
+# a nested compositor's socket, once it is there
+socket() { until_true test -S "$XDG_RUNTIME_DIR/$1"; }
+# the X display a compositor's XWayland took (the newest X socket but the virtual server's), as its session
+# would export it
+xwayland() {
+	local d
+	for _ in $(seq 100); do
+		d=$(ls -t /tmp/.X11-unix | grep -vx "X${XVFB_DISPLAY#:}" | head -n 1)
+		[[ -n $d ]] && { export DISPLAY=":${d#X}"; return 0; }
+		sleep 0.2
+	done
+	return 1
+}
 until_true() { for _ in $(seq 150); do "$@" >/dev/null 2>&1 && return 0; sleep 0.2; done; return 1; }
 wm_up() { xprop -root _NET_SUPPORTING_WM_CHECK | grep -q 'window id'; }
 gs() { gsettings set "$@"; }
@@ -103,14 +136,49 @@ case $desktop in
 		until_true bash -c "$(declare -f wm_up); wm_up && xprop -root _XROOTPMAP_ID | grep -q pixmap"
 		sleep 8
 		settings() { gsettings list-recursively org.cinnamon.desktop.background | sort; } ;;
-	kde)
-		kwin_x11 >"$work/wm.log" 2>&1 &
+	sway)
+		mkdir -p "$HOME/.config/sway"
+		printf 'output * resolution 1280x720 bg %s stretch\nxwayland enable\n' "$mine" >"$HOME/.config/sway/config"
+		WLR_BACKENDS=x11 WLR_RENDERER=pixman sway >"$work/wm.log" 2>&1 &
+		socket wayland-1
+		export WAYLAND_DISPLAY=wayland-1 SWAYSOCK
+		SWAYSOCK=$(ls "$XDG_RUNTIME_DIR"/sway-ipc.*.sock | head -n 1)
+		xwayland
+		sleep 2
+		settings() { :; } ;;
+	kde-wayland)
+		kwin_wayland --x11-display "$XVFB_DISPLAY" --width 1280 --height 720 --xwayland --socket wayland-k >"$work/wm.log" 2>&1 &
+		socket wayland-k
+		export WAYLAND_DISPLAY=wayland-k
+		xwayland
+		dbus-update-activation-environment WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE
+		;;&
+	gnome-wayland)
+		MUTTER_DEBUG_DUMMY_MODE_SPECS=1280x720 gnome-shell --nested --wayland >"$work/desktop.log" 2>&1 &
+		socket wayland-0
+		export WAYLAND_DISPLAY=wayland-0
+		xwayland
+		until_true bash -c 'ls "$XDG_RUNTIME_DIR"/.mutter-Xwaylandauth.*'
+		XAUTHORITY=$(ls "$XDG_RUNTIME_DIR"/.mutter-Xwaylandauth.* | head -n 1)
+		export XAUTHORITY
+		sleep 8
+		DISPLAY=$XVFB_DISPLAY xdotool mousemove 640 360 key Escape    # out of the overview it starts in
+		gs org.gnome.desktop.background picture-options stretched
+		gs org.gnome.desktop.background picture-uri "file://$mine"
+		gs org.gnome.desktop.background picture-uri-dark "file://$mine"
+		settings() { gsettings list-recursively org.gnome.desktop.background | sort; } ;;
+	kde|kde-wayland)
+		[[ $desktop == kde-wayland ]] || kwin_x11 >"$work/wm.log" 2>&1 &
 		plasmashell >"$work/desktop.log" 2>&1 &
 		plasma() {
 			dbus-send --session --print-reply=literal --dest=org.kde.plasmashell /PlasmaShell \
 				org.kde.PlasmaShell.evaluateScript "string:$1"
 		}
-		until_true bash -c "$(declare -f wm_up plasma); wm_up && plasma 'print(1)'"
+		if [[ $desktop == kde ]]; then
+			until_true bash -c "$(declare -f wm_up plasma); wm_up && plasma 'print(1)'"
+		else
+			until_true bash -c "$(declare -f plasma); plasma 'print(1)'"
+		fi
 		sleep 8
 		plasma "desktops().forEach(function (d) { d.wallpaperPlugin = 'org.kde.image';
 			d.currentConfigGroup = ['Wallpaper', 'org.kde.image', 'General'];
@@ -126,7 +194,7 @@ echo "--- $desktop on $DISPLAY"
 # the user's options (animate on software GL) and config: a theme, and the example plugins
 conf=$HOME/.config/retro
 mkdir -p "$conf/sources" "$conf/faces"
-echo "$DISPLAY  --software --demo" >"$conf/retro-wall.conf"
+echo "${WAYLAND_DISPLAY:-$DISPLAY}  --software --demo" >"$conf/retro-wall.conf"
 cp "$here"/examples/sources/* "$conf/sources/"
 cp "$here"/examples/faces/* "$conf/faces/"
 { echo 'theme = "night_city"'; grep -v '^theme' "$here/examples/retro.toml"; } >"$conf/retro.toml"
@@ -142,7 +210,7 @@ record() {
 			-o -path ./.local/share/gnome-shell -o -path ./.config/goa-1.0 -o -path ./.local/share/gvfs-metadata \
 			-o -path ./.local/share/recently-used.xbel -o -path './.config/k*' -o -path './.config/plasma*' \
 			-o -path './.local/share/k*' -o -path './.local/share/plasma*' -o -path ./.local/share/baloo \
-			-o -path ./.config/Trolltech.conf \) -prune -o -print0 | sort -z |
+			-o -path ./.config/Trolltech.conf -o -path ./.config/xdg-desktop-portal \) -prune -o -print0 | sort -z |
 			while IFS= read -r -d '' f; do
 				if [[ -f $f ]]; then
 					printf '%s %s %s\n' "$f" "$(stat -c '%a %s' "$f")" "$(cksum <"$f" | cut -d' ' -f1)"
@@ -157,15 +225,54 @@ record() {
 record >"$work/before"
 dump mine-before
 
+# native Wayland: the first run's protocol traffic logged, to show where its input goes (below)
+native=0
+[[ -z ${WAYLAND_DISPLAY:-} || $desktop == gnome-wayland ]] || native=1
 echo "--- install"
-if "$here/linux/install"; then pass "install"; else fail "install"; fi
+if WAYLAND_DEBUG=$([[ $native == 1 ]] && echo client) "$here/linux/install"; then pass "install"; else fail "install"; fi
 sleep 8
 check "retro-wall running, once" test "$(count)" -eq 1
 check "animating, not the still picture only" bash -c "! grep -q 'not animating' '$share/retro-wall.log'"
 check "starts at login" test -f "$HOME/.config/autostart/retro-wall.desktop"
+if [[ $desktop == sway ]]; then
+	# a new sway session, headless, with the user's config: the installer's line starts retro-wall in it;
+	# its compositor gone, that retro-wall ends
+	sockets=$(ls "$XDG_RUNTIME_DIR" | grep -x 'wayland-[0-9]*')
+	env -u WAYLAND_DISPLAY -u SWAYSOCK WLR_BACKENDS=headless WLR_RENDERER=pixman sway >"$work/login.log" 2>&1 &
+	login=$!
+	new_socket() { ls "$XDG_RUNTIME_DIR" | grep -x 'wayland-[0-9]*' | grep -vxF "$sockets"; }
+	until_true new_socket
+	second=$(new_socket | head -n 1)
+	in_login() {
+		local p
+		for p in $(pgrep -u "$(id -u)" -f "^$share/retro-wall( |\$)"); do
+			tr '\0' '\n' </proc/"$p"/environ 2>/dev/null | grep -qx "WAYLAND_DISPLAY=$second" && return 0
+		done
+		return 1
+	}
+	check "starts with a new sway session, from the line in its config" until_true in_login
+	kill "$login"
+	out_of_login() { ! in_login; }
+	check "ends when its compositor goes" until_true out_of_login
+fi
 check "the user's config taken, nothing refused" bash -c "! grep -E 'left out|^config:|^theme:|^widget |^layout:|panicked' '$share/retro-wall.log'"
 dump live-1; sleep 1; dump live-2
-v=$("$here/screen" clicks); check "installed: a click goes past it to the desktop in all nine parts of the screen ($v)" test "$v" = 1
+case $desktop in
+	sway|kde-wayland) check "on Wayland's layer-shell" grep -q '^display: Wayland, layer-shell' "$share/retro-wall.log" ;;
+	gnome-wayland) check "through XWayland, as GNOME has no layer-shell" grep -q '^display: X11' "$share/retro-wall.log" ;;
+esac
+if [[ $native == 1 ]]; then
+	# every surface's input region set empty (nothing added to the region before it is set), and no seat
+	# bound: no input comes to it
+	log=$share/retro-wall.log
+	surfaces=$(grep -c 'get_layer_surface(' "$log")
+	empty=$(input_regions "$log") || empty="not all"
+	check "installed: a click goes past it: an empty input region on its surfaces ($empty of $surfaces)" test "$empty" = "$surfaces" -a "$surfaces" -gt 0
+	check "installed: it takes no input at all (no seat bound)" bash -c "! grep -q 'bind(.*\"wl_seat\"' '$log'"
+else
+	v=$("$here/screen" clicks); check "installed: a click goes past it to the desktop in all nine parts of the screen ($v)" test "$v" = 1
+fi
+cp "$share/retro-wall.log" "$work/wall-install.log"
 pkill -u "$(id -u)" -f "^$share/retro-wall( |\$)"   # stopped: the desktop's own picture shows
 sleep 3
 dump still
@@ -175,6 +282,7 @@ if "$here/linux/install" --no-packages; then pass "install again"; else fail "in
 sleep 8
 check "retro-wall running, once" test "$(count)" -eq 1
 dump again-1; sleep 1; dump again-2
+cp "$share/retro-wall.log" "$work/wall-again.log"
 [[ $failed == 0 ]] || { echo "--- retro-wall.log"; cat "$share/retro-wall.log"; }
 cp "$(ls -t "$share"/wallpaper-*.png | head -n 1)" "$work/picture.png"
 
@@ -196,7 +304,11 @@ over() { awk -v a="$1" -v b="$2" 'BEGIN { exit !(a >= b) }'; }
 v=$(screen near "$work/mine-before.xwd" '#ff00ff'); check "before: the user's wallpaper shown ($v of the screen)" over "$v" 0.6
 v=$(screen near "$work/live-1.xwd" '#ff00ff'); check "installed: the user's wallpaper gone ($v left)" over 0.02 "$v"
 v=$(screen differ "$work/live-1.xwd" "$work/live-2.xwd"); check "installed: moving over the desktop ($v in a second)" over "$v" 0.0005
-v=$(screen like "$work/still.xwd" "$work/picture.png"); check "stopped: the desktop shows the still picture ($v)" over "$v" 0.6
+if [[ $desktop == sway ]]; then   # the wall lies over the user's wallpaper, which it leaves as it is
+	v=$(screen near "$work/still.xwd" '#ff00ff'); check "stopped: the user's background shows ($v)" over "$v" 0.6
+else
+	v=$(screen like "$work/still.xwd" "$work/picture.png"); check "stopped: the desktop shows the still picture ($v)" over "$v" 0.6
+fi
 v=$(screen differ "$work/again-1.xwd" "$work/again-2.xwd"); check "updated: moving again ($v in a second)" over "$v" 0.0005
 v=$(screen near "$work/mine-after.xwd" '#ff00ff'); check "uninstalled: the user's wallpaper back ($v)" over "$v" 0.6
 [[ -z ${RETRO_SHOTS:-} ]] || cp "$work"/*.xwd "$work"/*.log "$work/picture.png" "$RETRO_SHOTS/" 2>/dev/null

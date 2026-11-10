@@ -923,6 +923,9 @@ fn open_monitor(
                 crate::still::set_wallpaper(th, desk, s, &mut still);
             }
         }
+        // the live window draws all of the monitor: no window of the still picture under it, which on
+        // Wayland would be stacked over it (a layer keeps its newer surface on top)
+        None if d.wallpaper_hidden() => {}
         None => match d.window(s.x, s.y, s.w, s.h) {
             Ok(win) => {
                 let mut up = Uploads::default();

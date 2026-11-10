@@ -6,8 +6,9 @@
 # from a checkout with retro-wall and the screen tool built: cargo build --release, and cargo build
 # --release --example screen (or the two programs put at the top of the checkout).
 #
-# It installs a desktop (XFCE if none is named; KDE, GNOME, Cinnamon, MATE or LXDE on Debian), a
-# virtual X server and xwd, and none of what retro-wall itself needs, which the installer must bring.
+# It installs a desktop (XFCE if none is named; KDE, GNOME, Cinnamon, MATE or LXDE on Debian; on
+# Wayland, sway, KDE and GNOME on Debian), a virtual X server and xwd, and none of what retro-wall itself
+# needs, which the installer must bring.
 # Then it runs tests/linux/session as an ordinary user with sudo, as someone installing it on their
 # own desktop would. XFCE is tested on Debian, Ubuntu, Fedora and Arch.
 #
@@ -36,7 +37,10 @@ if command -v apt-get >/dev/null; then
 		cinnamon) pkgs="cinnamon cinnamon-session" ;;
 		mate) pkgs="caja marco mate-desktop-common" ;;
 		lxde) pkgs="pcmanfm openbox" ;;
-		*) say "no desktop $desktop (xfce, kde, gnome, cinnamon, mate, lxde)"; exit 2 ;;
+		sway) pkgs="sway swaybg xwayland" ;;
+		kde-wayland) pkgs="plasma-workspace plasma-desktop kwin-wayland xwayland" ;;
+		gnome-wayland) pkgs="gnome-shell gnome-settings-daemon xwayland xdotool" ;;
+		*) say "no desktop $desktop (xfce, kde, gnome, cinnamon, mate, lxde, sway, kde-wayland, gnome-wayland)"; exit 2 ;;
 	esac
 	export DEBIAN_FRONTEND=noninteractive
 	apt-get update -qq
@@ -64,6 +68,10 @@ if [ -x /usr/lib/systemd/systemd-logind ]; then
 	mkdir -p /run/systemd
 	/usr/lib/systemd/systemd-logind >/dev/null 2>&1 &
 fi
+
+# a program with a file capability does not start in a container (kwin_wayland's CAP_SYS_NICE): a copy,
+# which has none, comes first in PATH
+if [ -x /usr/bin/kwin_wayland ]; then cp /usr/bin/kwin_wayland /usr/local/bin/kwin_wayland; fi
 
 useradd -m -s /bin/bash tester
 echo 'tester ALL=(ALL) NOPASSWD: ALL' >/etc/sudoers.d/tester

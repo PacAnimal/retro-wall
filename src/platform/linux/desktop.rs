@@ -7,6 +7,10 @@
 //! | GNOME, Cinnamon, MATE | their background schema: the keys the user set | gsettings, dconf |
 //! | LXDE | pcmanfm's desktop-items files, whole | pcmanfm |
 //! | KDE Plasma | each desktop's wallpaper plugin and picture settings | qdbus or dbus-send |
+//!
+//! On wlroots compositors (sway, Hyprland) the wallpaper is a program's background-layer surface
+//! (swaybg, hyprpaper); retro-wall's lies over it, and none is set: one set while the wall runs would be a
+//! newer surface, stacked over the wall.
 
 use crate::platform::{Desktop, Screen};
 use crate::util::rgb;

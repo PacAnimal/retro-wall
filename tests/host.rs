@@ -233,6 +233,8 @@ fn desktop_detection() {
     assert_eq!(desktop::detect("X-Cinnamon", &running(&["cinnamon", "caja"])), Some("cinnamon"));
     assert_eq!(desktop::detect("KDE", &running(&["plasmashell"])), Some("kde"));
     assert_eq!(desktop::detect("", &running(&["pcmanfm"])), Some("lxde"));
+    assert_eq!(desktop::detect("sway", &running(&["sway", "swaybg"])), None);
+    assert_eq!(desktop::detect("Hyprland", &running(&["Hyprland", "hyprpaper"])), None);
     assert_eq!(desktop::detect("XFCE", &running(&["i3"])), None);
     for name in ["xfce", "gnome", "cinnamon", "mate", "lxde", "kde"] {
         assert_eq!(desktop::named(name).map(|d| d.name()), Some(name));
@@ -328,4 +330,14 @@ fn software_renderers_are_told_from_gpus() {
     for r in ["Mesa Intel(R) HD Graphics 500 (APL 2)", "Apple M5 Pro", "NVIDIA GeForce RTX 3080/PCIe/SSE2"] {
         assert!(!live::software(r), "{r}");
     }
+}
+
+/// linux/lib/compositors: the line that starts retro-wall under sway and Hyprland goes into their configs
+/// once and comes out leaving each as it was (tests/linux/compositors).
+#[test]
+#[cfg(target_os = "linux")]
+fn compositor_start_lines_come_out_as_they_went_in() {
+    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/linux/compositors");
+    let run = std::process::Command::new("bash").arg(script).output().expect("bash runs");
+    assert!(run.status.success(), "{}{}", String::from_utf8_lossy(&run.stdout), String::from_utf8_lossy(&run.stderr));
 }

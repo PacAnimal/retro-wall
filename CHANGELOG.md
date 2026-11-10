@@ -3,6 +3,23 @@
 Each release, newest first. A change to an interface in "What stays stable" (`EXTENDING.md`) is said
 here with its new number.
 
+## v0.1.2
+
+- **Wayland.** On a compositor with layer-shell (sway, Hyprland, KDE Plasma, labwc, niri, COSMIC) the
+  wall is a surface on each monitor's background layer, drawn with EGL at the monitor's own pixels, at
+  any scale. It lies over the compositor's wallpaper and leaves it as it is, and pauses while the
+  compositor does not show it (covered, or the monitor off). GNOME, which has no layer-shell, runs it
+  through XWayland. `RETRO_BACKEND=x11` or `=wayland` chooses.
+- The installer brings the Wayland and EGL libraries, and under sway and Hyprland, which start no
+  autostart entries, adds one marked line to the compositor's config; the uninstaller takes it out.
+- `retro-wall.conf`: in a Wayland session the line of its socket (`wayland-1`) comes first, then the X
+  display's.
+- Where the live window covers all of a monitor (Wayland; X11 while a remote desktop client hides the
+  wallpaper) and no desktop shows the still picture, no window of the still picture is made under it.
+- The install tests run under Wayland on sway and KDE Plasma (layer-shell) and GNOME (XWayland), as on
+  the X11 desktops; the lines that start it with sway and Hyprland are tested on their own. Hyprland
+  itself is not in the tests: nested in a container it needs a GPU.
+
 ## v0.1.1
 
 - The Windows setup program finds a world of blocks in a theme's scene as well as in its `[element]`

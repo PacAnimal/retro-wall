@@ -22,7 +22,7 @@ done
 say() { printf 'retro-wall: %s\n' "$*"; }
 die() { printf 'retro-wall: %s\n' "$*" >&2; exit 1; }
 # the desktop's settings can only be put back from inside the session, so check before removing anything
-[[ ! -e $share/desktop-before || -n ${DISPLAY:-} ]] ||
+[[ ! -e $share/desktop-before || -n ${WAYLAND_DISPLAY:-}${DISPLAY:-} ]] ||
 	die "run this inside your desktop session: it puts the desktop's wallpaper settings back as they were"
 program="$here/target/release/retro-wall"      # it puts the settings back: this checkout's, else the installed one
 [[ -x $program ]] || program="$here/retro-wall"
@@ -36,6 +36,9 @@ if pkill -u "$(id -u)" -f "$pattern"; then
 	say "stopped retro-wall"
 fi
 rm -f "${HOME}/.config/autostart/retro-wall.desktop"
+# shellcheck source=lib/compositors
+. "$here/linux/lib/compositors"
+compositor_stops "$share"
 
 if [[ -e $share/desktop-before ]]; then
 	"$program" --desktop restore "$share/desktop-before"

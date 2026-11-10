@@ -1,10 +1,11 @@
-//! Linux: X11 and GLX for the display, /proc and /sys for the machine, the desktop environments'
-//! own tools for their wallpaper.
+//! Linux: Wayland's layer-shell with EGL, or X11 and GLX, for the display; /proc and /sys for the
+//! machine; the desktop environments' own tools for their wallpaper.
 
 pub mod composite;
 pub mod desktop;
 pub mod font;
 pub mod system;
+pub mod wayland;
 pub mod x11;
 
 use crate::platform::Desktop;
@@ -14,10 +15,26 @@ pub use font::register_font;
 pub struct Linux;
 
 impl crate::platform::Platform for Linux {
-    type Display = x11::X;
+    type Display = Box<dyn crate::platform::Display>;
 
-    fn open() -> Result<x11::X, String> {
-        x11::X::open()
+    /// In a Wayland session, the compositor itself where it has layer-shell; else X11 (on GNOME, which
+    /// has none, through XWayland). RETRO_BACKEND=x11 or =wayland picks one.
+    fn open() -> Result<Self::Display, String> {
+        let wanted = std::env::var("RETRO_BACKEND").unwrap_or_default();
+        let session = std::env::var_os("WAYLAND_DISPLAY").is_some_and(|d| !d.is_empty());
+        if wanted == "wayland" || (session && wanted != "x11") {
+            match wayland::Wayland::open() {
+                Ok(w) => {
+                    crate::outln!("display: Wayland, layer-shell");
+                    return Ok(Box::new(w));
+                }
+                Err(e) if wanted == "wayland" => return Err(e),
+                Err(e) => crate::outln!("Wayland: {e}: through X11"),
+            }
+        }
+        let x = x11::X::open()?;
+        crate::outln!("display: X11");
+        Ok(Box::new(x))
     }
 
     crate::platform::readings_from_system!();

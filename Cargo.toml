@@ -1,6 +1,6 @@
 [package]
 name = "retro-wall"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 rust-version = "1.88"
 description = "A live desktop wallpaper: an animated retro scene with the machine's readings in it"
@@ -24,6 +24,14 @@ roxmltree = "0.20"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 x11-dl = "2.21"
+# Wayland: libwayland-client and libEGL are opened at run time (dlopen), so a system without them runs on X11
+wayland-client = "0.31"
+wayland-backend = { version = "0.3", features = ["client_system", "dlopen"] }
+wayland-sys = { version = "0.31", features = ["client", "egl", "dlopen"] }
+wayland-egl = "0.32"
+wayland-protocols = { version = "0.32", features = ["client", "staging", "unstable"] }
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+khronos-egl = { version = "6", features = ["dynamic"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

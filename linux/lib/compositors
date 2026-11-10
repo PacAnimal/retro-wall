@@ -1,0 +1,79 @@
+# Sourced by linux/install and linux/uninstall: retro-wall started with sway or Hyprland, which run no XDG
+# autostart entry. A line in the compositor's own config starts it, marked; uninstall takes out exactly
+# that line, and the newline put before it where the file had none at its end.
+#
+#   compositor_starts SHARE   the line added for each compositor that runs (or whose config is there)
+#   compositor_stops SHARE    every line added taken out again
+#
+# A sway user without a config of their own gets one that includes the system's, with the line; it is
+# removed again, whole, unless something has been added to it since. Hyprland reads hyprland.lua (0.55
+# and later), else hyprland.conf. A config that is a link (stow, home-manager) is changed where it points.
+
+compositor_mark="retro-wall: linux/uninstall removes this line"
+
+compositor_sway_own="include /etc/sway/config"
+
+# Each config: its compositor, its process, the file, the line that starts a program from it, and the
+# comment that marks it. The program's path quoted: a space in it is safe; a quote or backslash, which
+# these configs would read as their own, a $ (sway expands it) or # (a comment), is refused
+# (compositor_starts).
+compositor_table() {   # SHARE
+	local p="$1/retro-wall"
+	printf '%s\n' \
+		"sway	sway	${HOME}/.config/sway/config	exec \"$p\"	#" \
+		"Hyprland	Hyprland	${HOME}/.config/hypr/hyprland.lua	hl.on(\"hyprland.start\", function () hl.exec_cmd(\"'$p'\") end)	--" \
+		"Hyprland	Hyprland	${HOME}/.config/hypr/hyprland.conf	exec-once = '$p'	#"
+}
+
+compositor_starts() {   # SHARE
+	local share=$1 name process config line comment words done=""
+	if [[ $share == *[\"\'\\\$#]* ]]; then
+		say "$share: a quote, backslash, \$ or # in the path, which a compositor's config cannot hold: start retro-wall from it yourself"
+		return 0
+	fi
+	words="$(tr '[:upper:]' '[:lower:]' <<<":${XDG_CURRENT_DESKTOP:-}:")"
+	while IFS=$'\t' read -r name process config line comment; do
+		[[ " $done " != *" $name "* ]] || continue   # one config each: Hyprland's Lua one before its old one
+		if [[ $words != *":${name,,}:"* ]] && ! pgrep -u "$(id -u)" -x "$process" >/dev/null && [[ ! -f $config ]]; then
+			continue
+		fi
+		if [[ ! -f $config ]]; then
+			[[ $name == sway ]] || continue        # Hyprland writes its own at its first start
+			mkdir -p "$(dirname "$config")"
+			printf '%s\n' "$compositor_sway_own" >"$config"
+			printf '%s\n' "$config" >>"$share/written"
+		fi
+		done="$done $name"
+		grep -qF "$compositor_mark" "$config" && continue
+		if [[ -s $config && -n $(tail -c 1 "$config") ]]; then
+			printf '\n' >>"$config"
+			printf '%s\n' "$config" >>"$share/newline-added"
+		fi
+		printf '%s %s %s\n' "$line" "$comment" "$compositor_mark" >>"$config"
+		say "retro-wall starts with $name: $config"
+	done < <(compositor_table "$share")
+}
+
+compositor_stops() {   # SHARE
+	local share=$1 name process config line comment
+	while IFS=$'\t' read -r name process config line comment; do
+		[[ -f $config ]] && grep -qF "$compositor_mark" "$config" || continue
+		# a config written here, unchanged since: removed whole
+		if grep -qxF "$config" "$share/written" 2>/dev/null &&
+			[[ $(grep -vF "$compositor_mark" "$config") == "$compositor_sway_own" && $(wc -l <"$config") == 2 ]]; then
+			rm -f "$config"
+			rmdir "$(dirname "$config")" 2>/dev/null || :
+			continue
+		fi
+		# written back over the file itself: a link stays a link, and any sed will do
+		local kept
+		kept=$(mktemp)
+		sed "\\|$compositor_mark\$|d" "$config" >"$kept" && cat "$kept" >"$config"
+		rm -f "$kept"
+		# the newline the installer put before its line, where the file ended without one, if it is still the last byte
+		if grep -qxF "$config" "$share/newline-added" 2>/dev/null && [[ -z $(tail -c 1 "$config") ]]; then
+			truncate -s -1 "$(readlink -f "$config")"
+		fi
+	done < <(compositor_table "$share")
+	rm -f "$share/written" "$share/newline-added"
+}
