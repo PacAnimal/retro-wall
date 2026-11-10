@@ -10,7 +10,8 @@
 #   1. installs the libraries retro-wall needs (cairo, fontconfig, OpenGL, X11, Wayland), through sudo and
 #      apt, dnf or pacman, unless --no-packages is given or all of it is there
 #   2. copies retro-wall (built: target/release/retro-wall, or a retro-wall beside this script's directory)
-#      and the themes to ~/.local/share/retro
+#      and the themes to ~/.local/share/retro; installed by a package (a file linux/packaged beside this
+#      script), links to the package's retro-wall instead, so the package's updates are the user's too
 #   3. writes ~/.config/autostart/retro-wall.desktop, so it starts with every session; under sway or
 #      Hyprland, which do not read it, it also adds a line, marked, to the compositor's config; under
 #      KDE Plasma, a Plasma wallpaper and a KWin script (lib/kde); where Nemo is, retro-wall to the
@@ -35,6 +36,8 @@ for arg in "$@"; do
 		*) sed -n '4p' "$0" | sed 's/^# *//' >&2; exit 2 ;;
 	esac
 done
+packaged=0                                     # installed by a package manager, which brings the libraries
+[[ ! -e $here/linux/packaged ]] || { packaged=1; packages=0; }
 
 say() { printf 'retro-wall: %s\n' "$*"; }
 die() { printf 'retro-wall: %s\n' "$*" >&2; exit 1; }
@@ -110,10 +113,17 @@ make_dirs() {   # DIR...
 	printf '%s\n' "${made[@]}" | awk '!seen[$0]++' >>"$share/created"
 }
 make_dirs "$share" "$(dirname "$autostart")"
-install -m 755 "$binary" "$share/retro-wall"
+rm -f "$share/retro-wall"
 rm -rf "$share/themes"
-cp -R "$here/themes" "$share/themes"
-say "installed retro-wall and the themes in $share"
+if [[ $packaged == 1 ]]; then
+	# the program finds the themes beside the file the link points to
+	ln -s "$binary" "$share/retro-wall"
+	say "linked $share/retro-wall to the package's $binary: the package's updates are yours at the next start"
+else
+	install -m 755 "$binary" "$share/retro-wall"
+	cp -R "$here/themes" "$share/themes"
+	say "installed retro-wall and the themes in $share"
+fi
 
 # --- 3. at login ---------------------------------------------------------------------------------------
 

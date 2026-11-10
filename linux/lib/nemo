@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Sourced by linux/install and linux/uninstall: Nemo (Cinnamon's desktop) draws no desktop of its own when
 # it finds another program's window of type desktop, as the wall is, unless that program's WM_CLASS is in
 # its setting org.nemo.desktop ignored-desktop-handlers. A Nemo started after the wall (at login, or
@@ -34,6 +35,7 @@ nemo_starts() {
 	mapfile -t list < <(nemo_list)
 	if ! printf '%s\n' ${list[@]+"${list[@]}"} | grep -qxF "$nemo_class"; then
 		nemo_set ${list[@]+"${list[@]}"} "$nemo_class"
+		# shellcheck disable=SC2154  # share: the installer's, which sources this
 		: >"$share/nemo-added"
 	fi
 	say "Nemo draws its desktop with the wall there ($nemo_class in $nemo_schema $nemo_key)"

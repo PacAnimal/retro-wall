@@ -25,7 +25,11 @@ Before you open it, run what CI runs (Linux; the GL tests need Xvfb):
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 RETRO_REQUIRE_XVFB=1 cargo test --release
+ci/shellcheck                 # every shell script, every severity: a finding fails CI
 ```
+
+A new shell script starts with a `sh` or `bash` `#!`; a file that is only sourced names its shell in
+its first lines (`# shellcheck shell=bash`), so `ci/shellcheck` finds it. CI uses shellcheck 0.11.0.
 
 Or in a container with everything the tests need:
 
@@ -37,7 +41,7 @@ docker run --rm -v "$PWD:/src" -w /src -e CARGO_TARGET_DIR=/src/target/test -e R
 
 CI also builds for macOS and Windows, checks the dependencies (`cargo deny`) and the oldest Rust it
 supports (`rust-version` in `Cargo.toml`), and installs and uninstalls in containers of the Linux
-desktops. A pull request is merged when CI is green.
+desktops and the Arch Linux package (`packaging/aur/test`). A pull request is merged when CI is green.
 
 - **A visible change.** The GL tests compare each bundled theme with its picture in
   `tests/reference/`. Make the pictures again with `RETRO_BLESS=1 cargo test --release --test gl`, and

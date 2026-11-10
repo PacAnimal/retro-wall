@@ -109,6 +109,15 @@ Each [release](https://github.com/PacAnimal/retro-wall/releases/latest) has an a
 installer. Unpack it and run the installer as yourself, not as
 an administrator. Running it again updates; the uninstaller puts the desktop's own wallpaper back.
 
+**Arch Linux**: `packaging/aur/PKGBUILD` builds the latest release from its tag (it is not in the AUR
+yet). Build and install the package, then, as each user, inside the desktop session, set it up:
+
+```sh
+git clone https://github.com/PacAnimal/retro-wall && cd retro-wall/packaging/aur && makepkg -si
+/usr/lib/retro-wall/linux/install           # starts it now and at every login; the package's updates reach it
+/usr/lib/retro-wall/linux/uninstall         # before removing the package: the desktop's wallpaper back
+```
+
 **Linux** (Wayland: sway, Hyprland, KDE Plasma, GNOME, and any compositor with layer-shell; X11: XFCE,
 KDE Plasma, GNOME, Cinnamon, MATE, LXDE, or a window manager alone; glibc 2.35 or
 newer: Debian 12, Ubuntu 22.04 and later):
@@ -279,7 +288,9 @@ container: `docker run --rm -v "$PWD:/src:ro" debian:trixie /src/tests/linux/con
 `cargo build --release --example screen`); the table under "Install" names every desktop it runs.
 `sway`, `kde-wayland` and `gnome-wayland` run the Wayland desktops, nested on a virtual X server.
 Hyprland, which renders only through a KMS device, runs in a throwaway virtual machine instead:
-`tests/linux/vm hyprland` (KVM and QEMU; it boots Arch Linux's cloud image). CI (`.github/workflows/`) runs all of it, and builds for
+`tests/linux/vm hyprland` (KVM and QEMU; it boots Arch Linux's cloud image). `packaging/aur/test` builds
+the Arch Linux package from the working tree in a container, checks it with namcap, installs it and sets
+it up for a user. CI (`.github/workflows/`) runs all of it, and builds for
 macOS and Windows. A `v*` tag on a commit whose tests passed makes a release, its notes from
 `CHANGELOG.md`.
 

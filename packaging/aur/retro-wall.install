@@ -1,0 +1,26 @@
+# shellcheck shell=bash
+post_install() {
+  cat <<'MSG'
+retro-wall: set it up for each user, as that user, inside the desktop session:
+    /usr/lib/retro-wall/linux/install
+  It starts the wall now and at every login. Options: ~/.config/retro/retro-wall.conf (README).
+  Before you remove this package, run /usr/lib/retro-wall/linux/uninstall as each user: it puts
+  the desktop's own wallpaper back.
+MSG
+}
+
+post_upgrade() {
+  cat <<'MSG'
+retro-wall: a running wall keeps the old version until the next login. To restart it now, run
+    /usr/lib/retro-wall/linux/install
+  as the user, inside the desktop session.
+MSG
+}
+
+post_remove() {
+  cat <<'MSG'
+retro-wall: if a user had set it up and did not run linux/uninstall first, their login now starts
+  nothing. Remove ~/.config/autostart/retro-wall.desktop and ~/.local/share/retro, and set the
+  wallpaper again in the desktop's settings.
+MSG
+}

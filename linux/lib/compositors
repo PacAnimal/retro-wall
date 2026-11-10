@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Sourced by linux/install and linux/uninstall: retro-wall started with sway or Hyprland, which run no XDG
 # autostart entry. A line in the compositor's own config starts it, marked; uninstall takes out exactly
 # that line, and the newline put before it where the file had none at its end.
@@ -57,7 +58,7 @@ compositor_starts() {   # SHARE
 compositor_stops() {   # SHARE
 	local share=$1 name process config line comment
 	while IFS=$'\t' read -r name process config line comment; do
-		[[ -f $config ]] && grep -qF "$compositor_mark" "$config" || continue
+		if [[ ! -f $config ]] || ! grep -qF "$compositor_mark" "$config"; then continue; fi
 		# a config written here, unchanged since: removed whole
 		if grep -qxF "$config" "$share/written" 2>/dev/null &&
 			[[ $(grep -vF "$compositor_mark" "$config") == "$compositor_sway_own" && $(wc -l <"$config") == 2 ]]; then

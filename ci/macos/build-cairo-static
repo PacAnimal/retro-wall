@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/bin/bash
 # Build a static cairo for macOS: pixman, libpng and cairo (Quartz surface and fonts; no FreeType,
 # fontconfig, X11 or glib), so retro-wall links no library that macOS does not have. zlib, CoreText
 # and the rest come from the SDK.
@@ -10,11 +10,11 @@
 set -eu
 prefix=${1:?usage: build-cairo-static PREFIX}
 mkdir -p "$prefix"; prefix=$(cd "$prefix" && pwd)
-: ${MACOSX_DEPLOYMENT_TARGET:=11.0}; export MACOSX_DEPLOYMENT_TARGET
+: "${MACOSX_DEPLOYMENT_TARGET:=11.0}"; export MACOSX_DEPLOYMENT_TARGET
 work=$prefix/.build; mkdir -p "$work"; cd "$work"
 
 fetch() { # url sha256
-  local f=${1:t}
+  local f=${1##*/}
   [[ -f $f ]] || curl -sSfL -o "$f" "$1"
   echo "$2  $f" | shasum -a 256 -c - >/dev/null || { echo "checksum mismatch: $f"; exit 1; }
   rm -rf "${f%.tar.*}"; tar xf "$f"

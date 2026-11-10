@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Checks every shell script in the repository with shellcheck, at every severity: ci/shellcheck
+#
+# A script is a tracked file that starts with a sh, bash or dash #!, or a file sourced by another (or
+# read by makepkg) that names its shell in its first lines with "# shellcheck shell=bash". Any finding
+# fails. CI runs this with a pinned shellcheck (.github/workflows/test.yml), as checks differ between
+# versions.
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+scripts=()
+while IFS= read -r -d '' f; do
+	[[ -f $f ]] || continue
+	if head -1 "$f" | grep -qE '^#!.*[/ ](ba|da)?sh( |$)' || head -3 "$f" | grep -q '^# shellcheck shell='; then
+		scripts+=("$f")
+	fi
+done < <(git ls-files -z --cached --others --exclude-standard)
+shellcheck --version | sed -n 's/^version: /shellcheck /p'
+printf '%s\n' "${scripts[@]}" | sed 's/^/  /'
+shellcheck --severity=style --external-sources "${scripts[@]}"
+echo "shellcheck: ${#scripts[@]} scripts, clean"

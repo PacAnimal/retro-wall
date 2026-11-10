@@ -1,0 +1,57 @@
+# Maintainer: PacAnimal <pac@c-net.org>
+# shellcheck shell=bash disable=SC2034,SC2154,SC2164  # makepkg reads the variables, sets $pkgdir and $srcdir, and runs each function with errexit
+pkgname=retro-wall
+pkgver=0.1.4
+pkgrel=1
+pkgdesc="Live desktop wallpaper: an animated retro scene with the machine's readings in it (X11 and Wayland)"
+arch=('x86_64')
+url="https://github.com/PacAnimal/retro-wall"
+license=('GPL-3.0-only')
+# the X11, EGL and Wayland libraries are opened at run time, so namcap does not see them; bash runs the
+# per-user installer
+depends=('bash' 'cairo' 'glibc' 'libgcc' 'libglvnd' 'libx11' 'libxext' 'libxfixes' 'libxrandr' 'wayland')
+makedepends=('cargo' 'git')
+# makepkg's LTO flags make ring's C objects bitcode, which the Rust link cannot use; the release
+# profile strips the program, so a debug package would be empty
+options=('!lto' '!debug')
+optdepends=('xfconf: set the still picture as the XFCE wallpaper'
+            'glib2: XFCE and Cinnamon desktop settings (gdbus, gsettings)'
+            'virtualgl: hardware OpenGL where the display has only software OpenGL')
+install=retro-wall.install
+source=("git+$url.git#tag=v$pkgver")
+sha256sums=('SKIP')
+
+prepare() {
+  cd "$pkgname"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "$pkgname"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release --bin retro-wall
+}
+
+package() {
+  cd "$pkgname"
+  local lib="$pkgdir/usr/lib/$pkgname" share="$pkgdir/usr/share/$pkgname"
+
+  # the program finds its themes beside itself; the per-user installer and uninstaller beside it too
+  install -Dm755 target/release/retro-wall "$lib/retro-wall"
+  install -dm755 "$share" "$lib/linux"
+  cp -R --no-preserve=ownership themes "$share/themes"
+  ln -s "/usr/share/$pkgname/themes" "$lib/themes"
+  cp -R --no-preserve=ownership linux/install linux/uninstall linux/lib linux/kde "$lib/linux/"
+  # linux/install links each user's copy to this program, so pacman's updates reach them
+  printf '%s\n' "Installed by pacman: linux/install links to /usr/lib/$pkgname/retro-wall." >"$lib/linux/packaged"
+
+  install -dm755 "$pkgdir/usr/bin"
+  ln -s "/usr/lib/$pkgname/retro-wall" "$pkgdir/usr/bin/retro-wall"
+
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 fonts/LICENSE "$pkgdir/usr/share/licenses/$pkgname/fonts-LICENSE"
+  install -Dm644 -t "$pkgdir/usr/share/doc/$pkgname" README.md EXTENDING.md CHANGELOG.md
+  cp -R --no-preserve=ownership examples "$pkgdir/usr/share/doc/$pkgname/examples"
+}

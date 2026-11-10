@@ -10,5 +10,6 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
 apt-get install -y -q --no-install-recommends ca-certificates curl gcc libc6-dev pkg-config libcairo2-dev
 curl -sSf https://sh.rustup.rs | sh -s -- -y -q --profile minimal
+# shellcheck source=/dev/null  # written by rustup above
 . "$HOME/.cargo/env"
 cargo build --release --locked

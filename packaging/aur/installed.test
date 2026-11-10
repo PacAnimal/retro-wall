@@ -1,0 +1,27 @@
+# shellcheck shell=bash
+# Run by packaging/aur/test, as root in its container, the package installed: the program, the themes
+# beside it, and the per-user installer linking to the package's program, outside a session and inside one (Xvfb).
+pacman -S --noconfirm --needed xorg-server-xvfb xorg-xauth mesa procps-ng >/dev/null
+useradd -m tester
+as() { su tester -c "$*"; }
+fail() { echo "FAIL: $*" >&2; exit 1; }
+link=/home/tester/.local/share/retro/retro-wall
+
+echo "-- retro-wall --list from PATH"
+as 'retro-wall --list' | head -5
+echo "-- a snapshot of a named theme, found through the themes link"
+as 'xvfb-run -a retro-wall --theme winter --snapshot /tmp/winter.png'
+[[ -s /tmp/winter.png ]] || fail "no snapshot"
+
+echo "-- linux/install outside a session"
+as /usr/lib/retro-wall/linux/install
+[[ $(readlink "$link") == /usr/lib/retro-wall/retro-wall ]] || fail "$link is not a link to the package's program"
+[[ ! -e /home/tester/.local/share/retro/themes ]] || fail "themes copied"
+grep -qx "Exec=$link" /home/tester/.config/autostart/retro-wall.desktop || fail "autostart"
+
+echo "-- linux/install inside a session (Xvfb)"
+as "xvfb-run -a -s '-screen 0 1280x720x24' bash -c '/usr/lib/retro-wall/linux/install && sleep 2 && /usr/lib/retro-wall/linux/uninstall'"
+[[ ! -e $link && ! -L $link ]] || fail "uninstall left $link"
+[[ ! -e /home/tester/.config/autostart/retro-wall.desktop ]] || fail "uninstall left the autostart entry"
+pgrep -f "^$link" && fail "uninstall left it running"
+echo "-- passed"

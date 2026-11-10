@@ -1,0 +1,2 @@
+# Paths in source= directives are relative to the script that has them
+source-path=SCRIPTDIR

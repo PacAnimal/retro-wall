@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Builds and tests the Arch Linux (AUR) package in a throwaway Arch Linux container:
+#
+#   packaging/aur/test [--release]
+#
+# Builds the PKGBUILD beside this script with makepkg as a plain user, runs namcap on the PKGBUILD and
+# the package, installs it, runs installed.test (as root in the container), and removes it again. It
+# builds this checkout's working tree, checksums skipped, so a change is tested before it is released;
+# --release builds the PKGBUILD's own source, the release's git tag. It writes .SRCINFO beside the
+# PKGBUILD, from the PKGBUILD as it is. Nothing is installed on the host; it needs Docker.
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+src=(-v "$(cd "$here/../.." && pwd):/checkout:ro")
+case ${1:-} in
+	--release) src=() ;;
+	"") ;;
+	*) sed -n '4p' "$0" | sed 's/^# *//' >&2; exit 2 ;;
+esac
+out="$(mktemp -d)"
+trap 'rm -rf "$out"' EXIT
+
+docker run --rm -v "$here:/pkg:ro" -v "$out:/out" ${src[@]+"${src[@]}"} \
+	archlinux:latest bash -euo pipefail -c '
+	say() { printf "\n== %s\n" "$*"; }
+	say "toolchain"
+	pacman -Syu --noconfirm --needed base-devel namcap git >/dev/null
+	useradd -m builder
+	install -d -o builder /home/builder/pkg
+	install -o builder -m 644 /pkg/PKGBUILD /pkg/*.install /home/builder/pkg/
+	cd /home/builder/pkg
+	su builder -c "makepkg --printsrcinfo" >/out/.SRCINFO   # from the PKGBUILD as it is
+	# what makepkg -s would install, without giving builder sudo
+	deps="$(bash -c ". ./PKGBUILD; echo \"\${depends[*]} \${makedepends[*]}\"")"
+	# shellcheck disable=SC2086
+	pacman -S --noconfirm --needed $deps >/dev/null
+	skip=()
+	if [[ -d /checkout ]]; then
+		say "source: this checkout'"'"'s working tree"
+		tar -C /checkout --exclude=./target --exclude=./.git --transform "s|^\.|retro-wall|" -czf retro-wall.tar.gz .
+		sed -i "s|^source=.*|source=(retro-wall.tar.gz)|" PKGBUILD
+		skip=(--skipchecksums)
+	fi
+	chown -R builder: /home/builder
+	say "makepkg"
+	su builder -c "makepkg --noconfirm ${skip[*]}" 2>&1 | grep -vE "^\s+(Compiling|Downloaded|Downloading) " || exit 1
+	say "namcap"
+	namcap PKGBUILD ./*.pkg.tar.zst || :
+	say "contents"
+	pacman -Qlp ./*.pkg.tar.zst | grep -vE "/(themes|examples)/.+" 
+	say "install"
+	pacman -U --noconfirm ./*.pkg.tar.zst
+	say "the package'"'"'s tests"
+	bash -euo pipefail /pkg/installed.test
+	say "remove"
+	pacman -R --noconfirm "$(bash -c ". ./PKGBUILD; echo \$pkgname")"
+'
+if ! cmp -s "$out/.SRCINFO" "$here/.SRCINFO"; then
+	cp "$out/.SRCINFO" "$here/.SRCINFO"
+	echo "test: wrote .SRCINFO"
+fi
+echo "test: passed"

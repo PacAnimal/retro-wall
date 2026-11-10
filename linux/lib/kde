@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Sourced by linux/install and linux/uninstall: under KDE Plasma, retro-wall's Plasma wallpaper and KWin
 # script (linux/kde). The script keeps the wall below Plasma's desktop, whose icons and widgets show over
 # it through that wallpaper; on Wayland retro-wall chooses that wallpaper for itself.

@@ -9,7 +9,9 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 failed=0
+# shellcheck disable=SC2329  # both called by the library sourced below
 say() { :; }
+# shellcheck disable=SC2329
 pgrep() { return 1; }        # no compositor runs here: each case says which one through XDG_CURRENT_DESKTOP
 # shellcheck source=../../linux/lib/compositors
 . "$here/linux/lib/compositors"

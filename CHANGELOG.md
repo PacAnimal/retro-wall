@@ -3,6 +3,19 @@
 Each release, newest first. A change to an interface in "What stays stable" (`EXTENDING.md`) is said
 here with its new number.
 
+## v0.1.4
+
+- **Arch Linux**: a package, `packaging/aur/`, ready for the AUR (not there yet): `makepkg -si` in
+  that directory builds the release from its tag. It installs the program in `/usr/lib/retro-wall`
+  and `retro-wall` on the `PATH`; each user then runs `/usr/lib/retro-wall/linux/install`.
+- `linux/install` from a package's install (a file `linux/packaged` beside it) links the user's
+  `~/.local/share/retro/retro-wall` to the package's program instead of copying it, so the package
+  manager's updates reach every user at their next start, and brings no libraries itself.
+- The tests build the package in an Arch Linux container, check it with namcap, install it, set it
+  up for a user outside and inside a session, and take it out again.
+- Every shell script passes shellcheck at every severity (`ci/shellcheck`), and CI fails on any
+  finding. The macOS build scripts are bash now, which shellcheck reads.
+
 ## v0.1.3
 
 - **KDE Plasma under Wayland**: Plasma's icons and widgets show over the wall. The installer adds a

@@ -1,0 +1,29 @@
+pkgbase = retro-wall
+	pkgdesc = Live desktop wallpaper: an animated retro scene with the machine's readings in it (X11 and Wayland)
+	pkgver = 0.1.4
+	pkgrel = 1
+	url = https://github.com/PacAnimal/retro-wall
+	install = retro-wall.install
+	arch = x86_64
+	license = GPL-3.0-only
+	makedepends = cargo
+	makedepends = git
+	depends = bash
+	depends = cairo
+	depends = glibc
+	depends = libgcc
+	depends = libglvnd
+	depends = libx11
+	depends = libxext
+	depends = libxfixes
+	depends = libxrandr
+	depends = wayland
+	optdepends = xfconf: set the still picture as the XFCE wallpaper
+	optdepends = glib2: XFCE and Cinnamon desktop settings (gdbus, gsettings)
+	optdepends = virtualgl: hardware OpenGL where the display has only software OpenGL
+	options = !lto
+	options = !debug
+	source = git+https://github.com/PacAnimal/retro-wall.git#tag=v0.1.4
+	sha256sums = SKIP
+
+pkgname = retro-wall
