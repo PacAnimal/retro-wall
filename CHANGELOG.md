@@ -3,6 +3,21 @@
 Each release, newest first. A change to an interface in "What stays stable" (`EXTENDING.md`) is said
 here with its new number.
 
+## v0.1.6
+
+- **blocky**: the pig never goes through anything. Whatever it does off the faces it walks on (a hop
+  with its flips, a flight, a way of holding itself) is checked against the blocks first, the whole of
+  its body all the way; a crawl ends only on its feet, so it no longer hops off through a roof. It has
+  dozens of new things to do: it climbs any house's walls from any side, wanders between the houses,
+  treks up to the lodge, swims in the pond, jumps from roof to roof, sits, begs, naps, does flips and
+  the zoomies, and peeks up into your face from below the screen. It flies ten ways, no more often than
+  before. On the spot it turns at the herd's pace most of the time, swivelling round at once only now
+  and then. Its puffs of smoke no longer show through the houses in front of them.
+- **blocky**: leaves, plants and crops sway smoothly. They stepped a whole pixel where their offset
+  passed one, and those steps swept across the land in diagonal lines.
+- **blocky**: the waterfall beside the cliff cottage, which began in the air, is gone; a spruce stands
+  there, and no part of the rock wall behind the cottage stands alone against the sky.
+
 ## v0.1.5
 
 - **Windows**: the wall stays behind the desktop's icons and taskbar on drivers that flip a

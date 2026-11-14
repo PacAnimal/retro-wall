@@ -230,6 +230,11 @@ impl Herd {
         self.animals.iter().map(pose_key).chain(self.pig.as_ref().map(Pig::key)).collect()
     }
 
+    /// How far off the scene is at a pixel, where a patch holds it: with the pig, the whole screen.
+    pub fn depth(&self, x: i32, y: i32) -> Option<f32> {
+        self.patches.iter().find(|p| x >= p.at.0 && y >= p.at.1 && x < p.at.2 && y < p.at.3).map(|p| p.depth[p.index(x, y)])
+    }
+
     /// The pig's puffs of smoke in the air: where each went up, and how long ago, in seconds.
     pub fn puffs(&self) -> Vec<(V3, f64)> {
         self.pig.as_ref().map_or(vec![], |p| p.puffs().collect())

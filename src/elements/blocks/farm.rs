@@ -714,8 +714,7 @@ pub fn build(w: &mut World, seed: i64, c: (i32, i32), ahead: (f64, f64)) {
 
 /// A dwelling in the mountains left of the mine: a plateau levelled out of the slope, a cottage of logs
 /// and planks at its front, its door and windows to the viewer, a slab roof, lanterns either side of
-/// the door and a torch inside; a spruce, a bench and flowers about it, and a waterfall down the rock
-/// behind into a pool.
+/// the door and a torch inside; a spruce, a bench and flowers about it, and a pool.
 fn cliff_house(w: &mut World, ahead: (f64, f64)) {
     let p = cliff_at(ahead);
     let (ax, az) = if p.0.abs() > p.1.abs() { (p.0.signum() as i32, 0) } else { (0, p.1.signum() as i32) };
@@ -758,11 +757,15 @@ fn cliff_house(w: &mut World, ahead: (f64, f64)) {
             w.set(x, level - 1, z, GRASS);
         }
     }
-    // the rock wall at its back
+    // the rock wall at its back, where the mountain stands behind it: never a slab of its own against
+    // the sky
     for side in -8..=8 {
         let (x, z) = at(3, side);
+        let (bx, bz) = at(4, side);
         for y in level..level + 7 {
-            w.set(x, y, z, STONE);
+            if block(w.get(bx, y, bz)).shape == Shape::Cube {
+                w.set(x, y, z, STONE);
+            }
         }
     }
     // the cottage at the plateau's front, its door and windows to the viewer: logs at its corners,
@@ -814,18 +817,16 @@ fn cliff_house(w: &mut World, ahead: (f64, f64)) {
         let (x, z) = at(along, side);
         w.set(x, level, z, f);
     }
-    // the waterfall down the rock beside the house, into its pool
-    for y in level..level + 9 {
-        let (x, z) = at(3, 6);
-        w.set(x, y, z, WATER);
-    }
+    // a pool beside the house, and a spruce behind it
     for along in 1..=2 {
-        for side in 5..=7 {
+        for side in 4..=6 {
             let (x, z) = at(along, side);
             w.set(x, level - 1, z, WATER);
             w.set(x, level - 2, z, STONE);
         }
     }
+    let (x, z) = at(2, 7);
+    w.broadleaf(&mut rng, x, level, z, SPRUCE_LOG, SPRUCE_LEAVES, (5, 6));
 }
 
 /// A mineshaft in the foot of the grey mountain on the left, its mouth to the farm: a timber frame at

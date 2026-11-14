@@ -41,8 +41,10 @@ fn night(m: &Moment) -> f64 {
 
 /// The pig's puffs of smoke (each where it went up and how long ago, `pig::PUFF` at most): a burst of
 /// square puffs flung out every way, slowing, growing and thinning as they go; in two greys, light by
-/// day and by night. The puffs in each grey, and each's colour.
-pub fn puffs(cam: &Camera, from: &[(V3, f64)], m: &Moment) -> [(Vec<Square>, (f64, f64, f64)); 2] {
+/// day and by night. A puff behind what the scene shows at its middle (`depth`, how far off the scene
+/// is at a pixel) is hidden by it: a house between it and the eye. The puffs in each grey, and each's
+/// colour.
+pub fn puffs(cam: &Camera, from: &[(V3, f64)], m: &Moment, depth: impl Fn(i32, i32) -> Option<f32>) -> [(Vec<Square>, (f64, f64, f64)); 2] {
     let (mut dark, mut light) = (vec![], vec![]);
     let k = 0.55 + 0.45 * m.day;
     for &(at, age) in from {
@@ -61,6 +63,11 @@ pub fn puffs(cam: &Camera, from: &[(V3, f64)], m: &Moment) -> [(Vec<Square>, (f6
             let size = 0.25 + hash(n, 14) * 0.25 + life * 0.35;
             let alpha = 0.95 * (1.0 - life).powf(1.5);
             if let Some(s) = square(cam, q, size, alpha) {
+                let far = (0..3).map(|i| (q[i] - cam.eye[i]).powi(2)).sum::<f64>().sqrt();
+                let (cx, cy) = (((s.0 + s.2) / 2.0).floor() as i32, ((s.1 + s.3) / 2.0).floor() as i32);
+                if depth(cx, cy).is_some_and(|d| (d as f64) < far - 0.2) {
+                    continue;
+                }
                 if hash(n, 15) < 0.45 { dark.push(s) } else { light.push(s) }
             }
         }
@@ -244,6 +251,18 @@ pub fn birds(cam: &Camera, t: f64, m: &Moment) -> Vec<Square> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_puff_behind_a_house_is_hidden_by_it() {
+        let cam = Camera::new([0.0, 74.0, 0.0], 0.0, -0.1, 78.0, 1920, 1080);
+        let m = Moment::at(0.5, 6.5, 19.5, &cam, (0.47, 0.65, 1.0), (0.76, 0.85, 1.0));
+        // a puff twenty blocks ahead, just gone up
+        let puff = [(add(cam.eye, mul(cam.forward, 20.0)), 0.3)];
+        let count = |d: f32| puffs(&cam, &puff, &m, |_, _| Some(d)).iter().map(|(s, _)| s.len()).sum::<usize>();
+        assert!(count(100.0) > 10, "in the open: {}", count(100.0));
+        assert_eq!(count(10.0), 0, "a house ten blocks off, between it and the eye");
+        assert!(puffs(&cam, &puff, &m, |_, _| None).iter().map(|(s, _)| s.len()).sum::<usize>() > 10, "nothing known of the scene: shown");
+    }
 
     #[test]
     fn fireflies_are_specks_and_few() {

@@ -307,18 +307,30 @@ void main() {
   float mat = floor(sn.r / 40.0 + 0.5);
   float k = lens.w / 1080.0;
   // leaves and plants sway in gusts that pass across: each takes its colour from a pixel or so aside,
-  // where that is the same stuff
+  // where that is the same stuff. The offset is not whole pixels: the two pixels either side of it are
+  // blended by its fraction, so it moves smoothly. Whole pixels alone stepped where the offset passed
+  // one, and those steps ran across the land in lines as the sway moved
+  vec2 at2 = uv;
+  float w2 = 0.0;
   if (mat > 2.5 && mat < 4.5) {
     float gust = 0.55 + 0.45 * sin(clock * 0.35 + px.x * 0.0025 - px.y * 0.001);
     float amp = (mat > 3.5 ? 1.6 : 1.0) * k * gust;
-    vec2 off = vec2(sin(clock * 1.7 + px.x * 0.013 + px.y * 0.007) * amp, 0.0);
-    vec2 aside = uv + off / area.zw;
-    vec4 so = floor(texture2D(tex2, aside) * 255.0 + 0.5);
-    if (abs(floor(so.r / 40.0 + 0.5) - mat) < 0.5) { at = aside; sn = so; }
+    float o = sin(clock * 1.7 + px.x * 0.013 + px.y * 0.007) * amp;
+    float o0 = floor(o);
+    vec2 a0 = uv + vec2(o0, 0.0) / area.zw;
+    vec2 a1 = uv + vec2(o0 + 1.0, 0.0) / area.zw;
+    vec4 s0 = floor(texture2D(tex2, a0) * 255.0 + 0.5);
+    vec4 s1 = floor(texture2D(tex2, a1) * 255.0 + 0.5);
+    bool k0 = abs(floor(s0.r / 40.0 + 0.5) - mat) < 0.5;
+    bool k1 = abs(floor(s1.r / 40.0 + 0.5) - mat) < 0.5;
+    float fr = o - o0;
+    if (k0 && k1) { at = a0; at2 = a1; w2 = fr; sn = fr > 0.5 ? s1 : s0; }
+    else if (k0) { at = a0; at2 = a0; sn = s0; }
+    else if (k1) { at = a1; at2 = a1; sn = s1; }
   }
-  vec4 b = texture2D(tex0, at);
+  vec4 b = mix(texture2D(tex0, at), texture2D(tex0, at2), w2);
   if (b.a <= 0.0) discard;
-  vec4 l = texture2D(tex1, at);
+  vec4 l = mix(texture2D(tex1, at), texture2D(tex1, at2), w2);
   float n = floor(sn.g / 32.0 + 0.5);
   // an animal's side, turned any way: its normal by its angle, a whole turn in 256
   bool side = abs(mat - 6.0) < 0.5;

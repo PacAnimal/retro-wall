@@ -611,7 +611,7 @@ impl Part for BlockWorld {
                 gfx.rects(None, &glow, (0.8, 1.0, 0.4), Blend::Alpha);
                 gfx.rects(None, &core, (0.92, 1.0, 0.6), Blend::Alpha);
                 if let Some(herd) = &self.herd {
-                    for (puffs, grey) in life::puffs(&cam, &herd.puffs(), &m) {
+                    for (puffs, grey) in life::puffs(&cam, &herd.puffs(), &m, |x, y| herd.depth(x, y)) {
                         gfx.rects(None, &puffs, grey, Blend::Alpha);
                     }
                 }
@@ -847,7 +847,7 @@ mod tests {
     }
 
     #[test]
-    fn the_cliff_cottage_stands_on_its_plateau_with_a_waterfall() {
+    fn the_cliff_cottage_stands_on_its_plateau_with_a_pool() {
         let w = world();
         let k = world::cliff_at(ahead());
         let (kx, kz) = (k.0.round() as i32, k.1.round() as i32);
@@ -860,7 +860,7 @@ mod tests {
         };
         assert!(count(world::GLASS) >= 2 && count(world::DOOR_LOW) == 1, "a cottage with a door and windows");
         assert!(count(world::LANTERN) >= 2 && count(world::TORCH) >= 1, "lit at night");
-        assert!(count(world::WATER) >= 9, "a waterfall and its pool");
+        assert!(count(world::WATER) >= 6, "a pool beside it");
     }
 
     #[test]
