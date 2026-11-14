@@ -78,6 +78,8 @@ struct Monitor {
     icons: Option<Icons>,
     /// The window's rectangle on the monitor: x, y, width, height.
     pane: (i32, i32, i32, i32),
+    /// The still picture's path and colour as handed to the desktop, kept shown there.
+    wallpaper: Option<(String, String)>,
 }
 
 /// A monitor whose OpenGL cannot draw the live wall (older than 2.1, as Windows' own renderer in a
@@ -186,6 +188,7 @@ impl Monitor {
             whole,
             picture: None,
             icons: None,
+            wallpaper: None,
             pane: rect,
         })
     }
@@ -650,6 +653,17 @@ pub fn run(loaded: &Loaded, o: Options) {
                     m.next_frame = t;
                 }
             }
+            // a wallpaper set by another program, or by the user, while the wall runs: the still picture
+            // shown again, as the icons laid over the live picture are wherever the desktop differs from it
+            if let Some(desk) = desktop.as_deref() {
+                for m in &monitors {
+                    if let Some((path, colour)) = &m.wallpaper
+                        && desk.keep(&m.screen, path, colour)
+                    {
+                        crate::outln!("{}: the desktop showed another wallpaper: the still picture set again", m.screen.name);
+                    }
+                }
+            }
             // paused or not: a remote desktop client that connects both pauses the wall and hides the
             // wallpaper, and a wall kept for the old desktop would leave its new one half covered and stale
             {
@@ -920,7 +934,7 @@ fn open_monitor(
     match desktop {
         Some(desk) => {
             if desk.per_monitor() || lead {
-                crate::still::set_wallpaper(th, desk, s, &mut still);
+                mon.wallpaper = Some(crate::still::set_wallpaper(th, desk, s, &mut still));
             }
         }
         // the live window draws all of the monitor: no window of the still picture under it, which on
@@ -966,7 +980,7 @@ fn open_still(
     if let Some(desk) = desktop
         && (desk.per_monitor() || lead)
     {
-        crate::still::set_wallpaper(th, desk, s, &mut picture);
+        let _ = crate::still::set_wallpaper(th, desk, s, &mut picture);
     }
     let stride = picture.stride() as usize;
     let (w, h) = (s.w as usize, s.h as usize);
@@ -1046,7 +1060,9 @@ pub fn wallpapers(loaded: &Loaded, o: &Options) {
         if desktop.per_monitor() || lead.as_deref() == Some(s.name.as_str()) {
             let g = Geo { px_per_mm: s.px_per_mm(), ..Geo::new(s.w, s.h, &o.host, edges, header, Some(s.name.clone()), th.clone()) };
             match crate::still::draw(&g) {
-                Ok(mut pic) => crate::still::set_wallpaper(&th, desktop.as_ref(), &s, &mut pic),
+                Ok(mut pic) => {
+                    let _ = crate::still::set_wallpaper(&th, desktop.as_ref(), &s, &mut pic);
+                }
                 Err(e) => crate::errln!("{}: {e}", s.name),
             }
         }

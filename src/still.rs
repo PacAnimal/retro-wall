@@ -29,7 +29,8 @@ pub fn draw(g: &Geo) -> Result<ImageSurface, String> {
 
 /// Write a monitor's still picture, named by its content (a desktop may cache pictures by path), and
 /// have the desktop show it, `th`'s base colour round it. Older pictures for that monitor are removed.
-pub fn set_wallpaper(th: &Theme, desktop: &dyn Desktop, s: &Screen, picture: &mut ImageSurface) {
+/// The picture's path and the colour, as the desktop was given them.
+pub fn set_wallpaper(th: &Theme, desktop: &dyn Desktop, s: &Screen, picture: &mut ImageSurface) -> (String, String) {
     let dir = out_dir();
     let _ = std::fs::create_dir_all(&dir);
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
@@ -47,7 +48,8 @@ pub fn set_wallpaper(th: &Theme, desktop: &dyn Desktop, s: &Screen, picture: &mu
         }
     }
     let p = path.to_string_lossy().into_owned();
-    desktop.show(s, &p, &th.tw.base.hex());
+    let colour = th.tw.base.hex();
+    desktop.show(s, &p, &colour);
     crate::outln!("{name}: {}x{} -> {p}", picture.width(), picture.height());
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for e in entries.flatten() {
@@ -57,4 +59,5 @@ pub fn set_wallpaper(th: &Theme, desktop: &dyn Desktop, s: &Screen, picture: &mu
             }
         }
     }
+    (p, colour)
 }

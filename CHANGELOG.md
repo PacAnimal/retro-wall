@@ -3,6 +3,14 @@
 Each release, newest first. A change to an interface in "What stays stable" (`EXTENDING.md`) is said
 here with its new number.
 
+## v0.1.5
+
+- **Windows**: the wall keeps its still picture as the desktop's wallpaper while it runs. Another
+  wallpaper, or none, set by another program or by the user, made the wall draw the whole desktop
+  over itself, as the icons laid over the live picture are wherever the desktop differs from the still
+  picture: the new wallpaper or its plain colour showed, and the wall came back only at a restart. The
+  wall now checks every two seconds and sets its picture, placement and colour again.
+
 ## v0.1.4
 
 - **Arch Linux**: a package, `packaging/aur/`, ready for the AUR (not there yet): `makepkg -si` in

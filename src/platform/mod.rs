@@ -315,6 +315,12 @@ pub trait Desktop {
     }
     /// Show the picture at `path` on the monitor, centred on `colour` (#rrggbb).
     fn show(&self, s: &Screen, path: &str, colour: &str);
+    /// Show it again if the desktop shows something else now (another program or the user set a
+    /// wallpaper): true when it was set again. Checked every few seconds, so only where the check is
+    /// cheap; elsewhere nothing is done.
+    fn keep(&self, _s: &Screen, _path: &str, _colour: &str) -> bool {
+        false
+    }
     /// The wallpaper settings as they are, as text that `restore` takes.
     fn save(&self) -> Result<String, String>;
     /// Make the settings what `saved` says.

@@ -51,6 +51,18 @@ fn set_picture(path: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// #rrggbb as the registry holds a colour: "R G B".
+fn rgb(colour: &str) -> String {
+    let byte = |i: usize| colour.get(i..i + 2).and_then(|h| u8::from_str_radix(h, 16).ok()).unwrap_or(0);
+    format!("{} {} {}", byte(1), byte(3), byte(5))
+}
+
+/// Whether the desktop shows `path`, centred, on `rgb`.
+fn shows(path: &str, rgb: &str) -> bool {
+    let placed = get(DESKTOP, "WallpaperStyle").as_deref() == Some("0") && get(DESKTOP, "TileWallpaper").as_deref() == Some("0");
+    picture().eq_ignore_ascii_case(path) && placed && get(COLOURS, "Background").as_deref() == Some(rgb)
+}
+
 /// The desktop colour, "R G B" as the registry holds it, for this session too.
 fn set_colour(rgb: &str) -> Result<(), String> {
     let c: Vec<u32> = rgb.split_whitespace().filter_map(|v| v.parse().ok()).collect();
@@ -69,10 +81,8 @@ impl Desktop for Wallpaper {
 
     /// Centred, the colour round it.
     fn show(&self, _: &Screen, path: &str, colour: &str) {
-        let byte = |i: usize| colour.get(i..i + 2).and_then(|h| u8::from_str_radix(h, 16).ok()).unwrap_or(0);
-        let rgb = format!("{} {} {}", byte(1), byte(3), byte(5));
-        let placed = get(DESKTOP, "WallpaperStyle").as_deref() == Some("0") && get(DESKTOP, "TileWallpaper").as_deref() == Some("0");
-        if picture().eq_ignore_ascii_case(path) && placed && get(COLOURS, "Background").as_deref() == Some(rgb.as_str()) {
+        let rgb = rgb(colour);
+        if shows(path, &rgb) {
             return; // shown already: setting it again redraws the desktop
         }
         let done =
@@ -80,6 +90,16 @@ impl Desktop for Wallpaper {
         if let Err(e) = done {
             crate::errln!("wallpaper: {e}");
         }
+    }
+
+    /// The desktop draws its wallpaper under the live window, and the icons laid over the live picture
+    /// are wherever the desktop differs from the still picture: another wallpaper would cover all of it.
+    fn keep(&self, s: &Screen, path: &str, colour: &str) -> bool {
+        if shows(path, &rgb(colour)) {
+            return false;
+        }
+        self.show(s, path, colour);
+        true
     }
 
     /// Lines of setting, tab, value: the picture, its style and tiling, the colour round it.
