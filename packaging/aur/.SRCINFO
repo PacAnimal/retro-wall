@@ -1,6 +1,6 @@
 pkgbase = retro-wall
 	pkgdesc = Live desktop wallpaper: an animated retro scene with the machine's readings in it (X11 and Wayland)
-	pkgver = 0.1.4
+	pkgver = 0.1.5
 	pkgrel = 1
 	url = https://github.com/PacAnimal/retro-wall
 	install = retro-wall.install
@@ -23,7 +23,7 @@ pkgbase = retro-wall
 	optdepends = virtualgl: hardware OpenGL where the display has only software OpenGL
 	options = !lto
 	options = !debug
-	source = git+https://github.com/PacAnimal/retro-wall.git#tag=v0.1.4
+	source = git+https://github.com/PacAnimal/retro-wall.git#tag=v0.1.5
 	sha256sums = SKIP
 
 pkgname = retro-wall

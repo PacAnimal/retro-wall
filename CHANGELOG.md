@@ -3,6 +3,16 @@
 Each release, newest first. A change to an interface in "What stays stable" (`EXTENDING.md`) is said
 here with its new number.
 
+## v0.1.5
+
+- **Windows**: the wall stays behind the desktop's icons and taskbar on drivers that flip a
+  fullscreen GL window straight to the screen. A window exactly over a monitor was taken for a
+  fullscreen game, and the monitor showed the wall alone, while a screen capture still showed the
+  icons and the taskbar. A window that covers a whole monitor is now one row taller, above it (or one
+  column wider, right of it), where that strip is on no monitor, with its region cut to the picture so
+  that the strip is not part of the window. Where other monitors take both, it is one row shorter at
+  the top, where the still picture shows. Every pixel of the picture stays where it was.
+
 ## v0.1.4
 
 - **Arch Linux**: a package, `packaging/aur/`, ready for the AUR (not there yet): `makepkg -si` in

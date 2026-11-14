@@ -16,6 +16,14 @@
 //!
 //! Explorer restarting (TaskbarCreated, or the host window gone) takes the windows with it: they are
 //! made again in the new host, each keeping its GL context and so everything uploaded, and drawn again.
+//!
+//! A window that covers a whole monitor is one row taller than its picture, the row above the monitor
+//! (or one column wider, right of it), outside every monitor. A GL window exactly over a monitor is
+//! taken for a fullscreen game: the driver flips its frames to the screen past DWM (PresentMon:
+//! `Hardware: Legacy Flip`), and the monitor shows the wall without the icons or the taskbar, while a
+//! screen capture still shows both. GL draws from the bottom-left corner, so the picture stays on the
+//! same pixels. The window's region is the picture's rectangle: the extra row or column is not part of
+//! the window, and shows nothing, whatever lies there.
 
 use super::wide;
 use crate::platform::{Edges, Rect, Screen, WindowId};
@@ -28,7 +36,8 @@ use std::time::{Duration, Instant};
 use windows_sys::Win32::Foundation::{COLORREF, HMODULE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute};
 use windows_sys::Win32::Graphics::Gdi::{
-    BeginPaint, ClientToScreen, EndPaint, EnumDisplayMonitors, GetDC, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO, MONITORINFOEXW, PAINTSTRUCT, ReleaseDC,
+    BeginPaint, ClientToScreen, CreateRectRgn, EndPaint, EnumDisplayMonitors, GetDC, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO, MONITORINFOEXW, PAINTSTRUCT,
+    ReleaseDC, SetWindowRgn,
 };
 use windows_sys::Win32::Graphics::OpenGL::{
     ChoosePixelFormat, HGLRC, PFD_DOUBLEBUFFER, PFD_DRAW_TO_WINDOW, PFD_MAIN_PLANE, PFD_SUPPORT_OPENGL, PFD_TYPE_RGBA, PIXELFORMATDESCRIPTOR, SetPixelFormat,
@@ -211,6 +220,44 @@ fn find_host() -> Option<Host> {
     Some(Host { hwnd, icons, origin: (p.x, p.y) })
 }
 
+/// Where a pane's window goes for its rectangle on the virtual screen: where the rectangle covers a
+/// whole monitor, one row more above it, or one column more right of it, where that row or column is
+/// on no monitor; else one row less at its top, where the still picture shows. Not exactly over the
+/// monitor, its frames go through DWM (see the module's notes). GL draws from the bottom-left corner,
+/// so each pixel of the picture stays where it was.
+fn placed(rect: (i32, i32, i32, i32)) -> (i32, i32, i32, i32) {
+    let (x, y, w, h) = rect;
+    let screens: Vec<RECT> = monitors().into_iter().map(|(_, m)| m.monitorInfo.rcMonitor).collect();
+    let whole = screens.iter().any(|r| x <= r.left && y <= r.top && x + w >= r.right && y + h >= r.bottom);
+    if !whole || h < 2 {
+        return rect;
+    }
+    let clear = |l: i32, t: i32, r: i32, b: i32| !screens.iter().any(|m| l < m.right && r > m.left && t < m.bottom && b > m.top);
+    if clear(x, y - 1, x + w, y) {
+        (x, y - 1, w, h + 1)
+    } else if clear(x + w, y, x + w + 1, y + h) {
+        (x, y, w + 1, h)
+    } else {
+        (x, y + 1, w, h - 1)
+    }
+}
+
+/// The window's region cut to `rect`, its picture's rectangle, where `placed` made the window larger
+/// (at `at`, w x h): the row or column outside it is not part of the window.
+fn clip(hwnd: HWND, rect: (i32, i32, i32, i32), at: (i32, i32, i32, i32)) {
+    let ((x, y, w, h), (px, py, pw, ph)) = (rect, at);
+    if (pw, ph) == (w, h) || pw < w || ph < h {
+        return;
+    }
+    // SAFETY: our own window; the region, once set, is the system's, and is freed by it.
+    unsafe {
+        let rgn = CreateRectRgn(x - px, y - py, x - px + w, y - py + h);
+        if !rgn.is_null() {
+            SetWindowRgn(hwnd, rgn, 1);
+        }
+    }
+}
+
 /// Every monitor: its handle and its MONITORINFOEXW.
 fn monitors() -> Vec<(HMONITOR, MONITORINFOEXW)> {
     unsafe extern "system" fn each(m: HMONITOR, _: HDC, _: *mut RECT, out: LPARAM) -> i32 {
@@ -297,7 +344,7 @@ impl Win {
     /// when Explorer comes.
     fn child(&mut self, rect: (i32, i32, i32, i32)) -> Result<(HWND, HDC), String> {
         let host = self.host();
-        let (x, y, w, h) = rect;
+        let (x, y, w, h) = placed(rect);
         let layered = if host.is_some_and(|h| h.icons.is_some()) { WS_EX_LAYERED } else { 0 };
         let (style, ex, parent, origin) = match host {
             Some(h) => (WS_CHILD, WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | layered, h.hwnd, h.origin),
@@ -327,6 +374,7 @@ impl Win {
             if layered != 0 {
                 SetLayeredWindowAttributes(hwnd, 0 as COLORREF, 255, LWA_ALPHA);
             }
+            clip(hwnd, rect, (x, y, w, h));
             self.restack(hwnd, host);
             let dc = GetDC(hwnd);
             let mut pfd: PIXELFORMATDESCRIPTOR = zeroed();
@@ -517,9 +565,10 @@ impl Win {
         }
         self.host = Some(Host { origin: (p.x, p.y), ..host });
         for pane in self.panes.values() {
-            let (x, y, w, h) = pane.rect;
+            let (x, y, w, h) = placed(pane.rect);
             // SAFETY: our own window; no z-order change or activation.
             unsafe { SetWindowPos(pane.hwnd, null_mut(), x - p.x, y - p.y, w, h, SWP_NOZORDER | SWP_NOACTIVATE) };
+            clip(pane.hwnd, pane.rect, (x, y, w, h));
         }
     }
 }

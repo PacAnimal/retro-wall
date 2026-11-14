@@ -248,12 +248,11 @@ impl Ranges {
                 c.line_to(*x, hz - h[k]);
             }
         };
-        for k in 0..2 {
+        for (k, &((r, g, b), a)) in self.fill.iter().enumerate() {
             trace(k);
             c.line_to(hs[hs.len() - 1].0, hz);
             c.line_to(hs[0].0, hz);
             c.close_path();
-            let ((r, g, b), a) = self.fill[k];
             c.set_source_rgba(r, g, b, a * strength);
             let _ = c.fill();
         }

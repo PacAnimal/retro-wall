@@ -1,7 +1,7 @@
 # Maintainer: PacAnimal <pac@c-net.org>
 # shellcheck shell=bash disable=SC2034,SC2154,SC2164  # makepkg reads the variables, sets $pkgdir and $srcdir, and runs each function with errexit
 pkgname=retro-wall
-pkgver=0.1.4
+pkgver=0.1.5
 pkgrel=1
 pkgdesc="Live desktop wallpaper: an animated retro scene with the machine's readings in it (X11 and Wayland)"
 arch=('x86_64')
