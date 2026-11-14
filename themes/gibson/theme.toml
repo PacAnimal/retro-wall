@@ -1,0 +1,43 @@
+# gibson: down a street of a big computer's insides, drawn as a city of light. Towers of tinted glass
+# stand on either side, every face covered in what the machine holds: lists of its directories in wide
+# capitals, columns of figures, small print, diagrams, glowing from within. The floor is a circuit
+# board under dark glass, its traces lit and the towers mirrored in it, the street running off into
+# the dark.
+#
+# The files are at work. A bar scans down a tower's list, a file is chosen and turns purple, and a
+# pulse carries it along the floor's traces, or a beam across the street, to another tower, whose
+# list is written again from the top with the file in it, flashing. Pulses run errands along the
+# traces between. The disk's work sets how many files move; the processor's how busy the floor is.
+format = 1                  # the theme format it is written for: EXTENDING.md, "What stays stable"
+name = "Gibson"
+
+scene = ["data-city", "title", "instruments"]
+
+[monitors]                  # a pure wallpaper: nothing over the scene. title = "rightmost" in retro.toml
+title = "none"              # shows the hostname, in the lettering below
+widgets = "none"
+graph = "none"
+status = "none"
+
+[palette]                   # the city's: deep blue dark, cyan glass, violet traces
+base = "#040a1c"
+shadow = "#02050e"
+deep = "#0c2a3c"
+ramp = ["#141c5a", "#2a3c9a", "#3b4cff", "#2a6cff", "#1fd2e0", "#c8f2ff"]
+title_top = "#ffffff"
+title_light = "#c8f2ff"
+title_bottom = "#1fd2e0"
+glow = "#1fd2e0"
+ridge = "#c35cff"
+caption = "#8ee8f4"
+bracket = "#2a3c9a"
+
+[tweaks]
+title_corner = "top-right"
+title_glow = [[10, 0.35]]
+rule = false
+ruler_end = 0.0
+
+[element.data-city]
+files = "disk"              # what sets how many files move: a source's name
+traffic = "cpu"             # and how busy the floor's traces are

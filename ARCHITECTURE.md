@@ -39,6 +39,15 @@ holds what such an element shares, so a new one is a world and its models, not a
   A thing hidden where it is (all of its pixels behind the scene) changes nothing.
 - `rows`: a picture filled row by row on every core.
 
+A traced scene can change without moving: `elements/data_city/` lights and darkens the lettering on its
+towers' faces, behind and through tinted glass. Its picture is traced once (one ray a pixel, a grid of them
+where neighbours meet something else first) and kept. A pixel's light is a sum of terms, one for each
+panel of lettering along its ray. When a panel is first marked, each pixel that sees it is found once: how
+much of the face's light reaches the eye there, where on the face it looks, and the panel's share of the
+lettering's light there. A mark then changes only the rows it touches: each pixel's light, kept linear for
+every pixel ever changed, gains the panel's share now less the share it last gave, with no ray traced. The
+pixels are kept in order up the face, so a row's are found without looking at the rest.
+
 What is the same each start (the traced picture, its depths, pictures made at many sizes) goes in the
 theme's cache: `svg::kept_bytes`, keyed by the screen size, a tag of the settings it was made with, the
 theme file and the build; `svg::kept_read` and `svg::keep` read and write it apart, so it is read while

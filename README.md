@@ -2,8 +2,8 @@
 
 A live desktop wallpaper: a scene that moves (a synthwave horizon, a rainy neon city, an arctic night,
 the digital rain, a winter field, a pirate island, an engine of copper and steam, a road at sunset, a
-forest with a river, a farm of blocks), with the machine's readings in it: meters, a tape deck that
-plays with the disks, the network's traffic as mountains, its status line.
+forest with a river, a farm of blocks, a city of files in glass towers), with the machine's readings in
+it: meters, a tape deck that plays with the disks, the network's traffic as mountains, its status line.
 
 One Rust binary. It draws on the GPU (OpenGL 3.3, or 2.1 on older hardware), presents a frame only when
 something in it changed, and stops while the picture is covered or the machine is on battery.
@@ -79,9 +79,16 @@ the food the free memory, the experience bar the disk's activity and its level h
 <br><img src="screenshots/themes/blocky-times.png" width="800" alt="blocky at 07:00 with the scene alone, at 13:00 with its interface, at 19:15 with the interface and the hand, and at 23:00 with the hostname alone">
 <br>The scene alone, with its interface (the default), with the interface and the hand, and with the hostname.
 </td></tr>
+<tr><td>
+<a href="screenshots/themes/gibson.png"><img src="screenshots/themes/gibson.gif" width="800" alt="gibson: a street between glass towers covered in lists of files, over a glowing circuit board, signals running its wires"></a><br>
+<b>gibson</b>: down a street of a big computer's insides, drawn as a city of glass towers covered in its files,
+over a circuit board. Files are scanned, fetched and copied from tower to tower, lists scroll and are written
+again, graphs update, and signals run the board's wires: the disk's activity sets how many files move, the
+processor's how busy the wires are
+</td></tr>
 </table>
 
-matrix, racing and forest show only the scene by default, and blocky the scene and its interface. Set
+matrix, racing, forest and gibson show only the scene by default, and blocky the scene and its interface. Set
 `[monitors]` in `retro.toml` to show the hostname, instruments and graph, as here. Any theme's parts are
 settings `retro.toml` can change, so a part is hidden or moved without a theme of your own: blocky's hand
 is off by default, and `[element.block-world]` with `hand = true` turns it on; `ui = false` hides the
@@ -258,7 +265,7 @@ first (`wayland-1  --theme winter`), then the X display's. The theme, the instru
 sources go in `~/.config/retro/retro.toml`.
 
 Themes: `phosphor` (the default), `neon_rain`, `night_city`, `aurora`, `winter`, `matrix`, `guybrush`,
-`copperworks`, `racing`, `forest`, `blocky`.
+`copperworks`, `racing`, `forest`, `blocky`, `gibson`.
 
 ## Extending
 

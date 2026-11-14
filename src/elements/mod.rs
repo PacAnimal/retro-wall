@@ -6,6 +6,7 @@ pub mod blocks;
 pub mod city;
 pub mod code_rain;
 pub mod core;
+pub mod data_city;
 pub mod instruments;
 pub mod island;
 pub mod machine;
@@ -117,6 +118,7 @@ const MODULES: &[Module] = &[
     module(road::kinds),
     module(woodland::kinds),
     module(blocks::kinds),
+    module(data_city::kinds),
 ];
 
 /// Every element kind, with its defaults parsed.
