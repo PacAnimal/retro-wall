@@ -120,6 +120,23 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # every tag, to find the release before this one and whether this one is the newest
+          fetch-depth: 0
+      - name: The release before it is out first
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # tags pushed together build side by side, but are released in their order: each waits for the
+        # release of the highest tag below it, up to an hour and a half
+        run: |
+          before="$(git tag --list 'v*' --sort=-v:refname | awk -v t="$GITHUB_REF_NAME" 'f { print; exit } $0 == t { f = 1 }')"
+          test -n "$before" || exit 0
+          for _ in $(seq 90); do
+            gh release view "$before" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && exit 0
+            sleep 60
+          done
+          echo "$before has no release: release it first, then run this again"
+          exit 1
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: archives
@@ -132,5 +149,10 @@ jobs:
           # this version's section of CHANGELOG.md, without its heading
           awk -v v="## $GITHUB_REF_NAME" '/^## / { on = ($0 == v || index($0, v " ") == 1); next } on' CHANGELOG.md >notes.md
           (cd archives && sha256sum -- * >SHA256SUMS)
+          # the latest release only if this is the newest version: an older one released or run again
+          # after it does not take its place
+          newest="$(git tag --list 'v*' --sort=-v:refname | head -1)"
+          latest=false
+          test "$newest" = "$GITHUB_REF_NAME" && latest=true
           gh release create "$GITHUB_REF_NAME" archives/* --repo "$GITHUB_REPOSITORY" \
-            --title "retro-wall $GITHUB_REF_NAME" --notes-file notes.md
+            --title "retro-wall $GITHUB_REF_NAME" --notes-file notes.md --latest="$latest"
