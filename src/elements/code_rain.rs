@@ -645,36 +645,16 @@ impl Part for CodeTitle {
     fn paint(&mut self, g: &Geo, ctx_: &Context, _s: &mut Shared) {
         let (w, h) = (g.w, g.h);
         let font = &self.font;
-        let text: Vec<char> = g.th.title_text(&g.host).iter().flat_map(|c| c.to_uppercase()).filter(|c| font.glyphs.contains_key(c)).collect();
-        let p = g.th.title_place(w, h, &g.host, Edges::NONE);
-        let (y0, base, x0) = (p.y0, p.base, p.x0);
-        let mut pens = vec![];
-        let mut pen = 0.0;
-        for k in 0..text.len() {
-            pens.push(pen);
-            let pair: String = text[k..(k + 2).min(text.len())].iter().collect();
-            pen += font.glyphs.get(&text[k]).map_or(0.0, |g| g.advance) + font.kerning.get(&pair).copied().unwrap_or(0.0);
-        }
-        let boxes: Vec<(f64, f64, f64)> = pens
-            .iter()
-            .zip(&text)
-            .filter_map(|(&p, ch)| {
-                let b = font.glyphs.get(ch)?.ink;
-                Some((p + b[0], b[1], p + b[2]))
-            })
-            .collect();
         let surface_ = surface(w, h);
         let out = surface(w, h);
         {
             let o = ctx(&out);
-            if !boxes.is_empty() {
-                let left = boxes.iter().map(|b| b.0).fold(f64::INFINITY, f64::min);
-                let right = boxes.iter().map(|b| b.2).fold(f64::NEG_INFINITY, f64::max);
-                let top = -boxes.iter().map(|b| b.1).fold(f64::INFINITY, f64::min);
-                let tr = g.th.title_right(w, h);
-                let s = ((base - y0) * 1.25 / 1.0f64.max(top)).min((tr - x0) / 1.0f64.max(right - left));
-                let x1 = tr;
-                let (x0_ink, y0_ink) = (x1 - (right - left) * s, base - top * s);
+            // where the hostname is in this lettering: the theme's own placement of it, which what lines up
+            // with the hostname uses too
+            if let Some(p) = g.th.own_place(w, h, &g.host, Edges::NONE) {
+                let ((_, right, top), s, base, x1) = (p.ink, p.s, p.base, p.right);
+                let (pens, text) = (&p.pens, &p.text);
+                let (x0_ink, y0_ink) = (x1 - (right - p.ink.0) * s, base - top * s);
                 let (pad, blur) = (0.35 * top * s, 2.0f64.max((0.5 * top * s).round()));
                 let dark = surface(w, h);
                 {
@@ -690,7 +670,7 @@ impl Part for CodeTitle {
                 c.set_source_rgb(r, gg, b);
                 c.translate(x1 - right * s, base);
                 c.scale(s, s);
-                for (&p, &ch) in pens.iter().zip(&text) {
+                for (&p, &ch) in pens.iter().zip(text.iter()) {
                     let _ = c.save();
                     c.translate(p, 0.0);
                     font.letter(&c, ch);
@@ -735,7 +715,11 @@ shade = 0.9"##,
             check: check::<CodeTitleSettings>,
             make: |_, t, g| {
                 let s: CodeTitleSettings = settings(t);
-                Ok(vec![Box::new(CodeTitle { colour: s.colour, glow: s.glow, shade: s.shade, font: Lettering::load(&g.th, "Matrix")? })])
+                let font = Lettering::load(&g.th, "Matrix")?;
+                // the hostname's place is these letters': what lines up with the hostname finds them
+                let glyphs = font.glyphs.iter().map(|(&c, gl)| (c, (gl.advance, gl.ink))).collect();
+                g.th.set_own_lettering(crate::title::OwnLettering { glyphs, kerning: font.kerning.clone() });
+                Ok(vec![Box::new(CodeTitle { colour: s.colour, glow: s.glow, shade: s.shade, font })])
             },
         },
     ]

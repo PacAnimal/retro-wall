@@ -14,12 +14,35 @@ type Pts = Vec<(f64, f64)>;
 type InkEdges = Vec<Option<(f64, f64)>>;
 
 /// A theme's lettering measurements, each made once when first needed: a glyph's ink edges by row, a
-/// pair's kerning, a name's ink reach.
+/// pair's kerning, a name's ink reach; and the lettering of its own an element draws the hostname in,
+/// if one does.
 #[derive(Default)]
 pub struct Measures {
     edges: Mutex<HashMap<char, InkEdges>>,
     kerns: Mutex<HashMap<(char, char), f64>>,
     ink: Mutex<HashMap<String, Ink>>,
+    own: Mutex<Option<std::sync::Arc<OwnLettering>>>,
+}
+
+/// A lettering of a theme's own, drawn by an element in place of the hostname's (the matrix's
+/// `codetitle`): each glyph's advance and ink box [x_min, y_min, x_max, y_max] in its units, y down,
+/// origin on the baseline, and its pairs' kerning. With one, the hostname's place is its letters'.
+#[derive(Clone, Debug, Default)]
+pub struct OwnLettering {
+    pub glyphs: HashMap<char, (f64, [f64; 4])>,
+    pub kerning: HashMap<String, f64>,
+}
+
+/// The hostname in a lettering of the theme's own, placed: its letters (upper case, those it has), each
+/// one's pen position, its scale (pixels a unit), the right of its ink, its baseline, and its ink box
+/// in its units (left, right, height above the baseline).
+pub struct OwnPlaced {
+    pub text: Vec<char>,
+    pub pens: Vec<f64>,
+    pub s: f64,
+    pub right: f64,
+    pub base: f64,
+    pub ink: (f64, f64, f64),
 }
 
 /// How far a name's ink (strokes and extrusion, slanted) reaches past its slanted letter box, in letter
@@ -370,10 +393,57 @@ impl Theme {
         v
     }
 
+    /// The lettering of the theme's own its element draws the hostname in, from now on (`OwnLettering`).
+    pub fn set_own_lettering(&self, l: OwnLettering) {
+        *held(&self.measures.own) = Some(std::sync::Arc::new(l));
+    }
+
+    /// The hostname in the theme's own lettering, if it has one: as tall as the hostname's letters and
+    /// a quarter (the film's capitals), no wider than their room, the right of its ink at the hostname's
+    /// right; in the top right corner of a theme with a corner the top of its ink at it, else on the
+    /// hostname's baseline.
+    pub fn own_place(&self, width: i32, height: i32, host: &str, edges: Edges) -> Option<OwnPlaced> {
+        let own = held(&self.measures.own).clone()?;
+        let text: Vec<char> = self.title_text(host).iter().flat_map(|c| c.to_uppercase()).filter(|c| own.glyphs.contains_key(c)).collect();
+        if text.is_empty() {
+            return None;
+        }
+        let p = self.letter_place(width, height, host, edges);
+        let mut pens = vec![];
+        let mut pen = 0.0;
+        for k in 0..text.len() {
+            pens.push(pen);
+            let pair: String = text[k..(k + 2).min(text.len())].iter().collect();
+            pen += own.glyphs.get(&text[k]).map_or(0.0, |g| g.0) + own.kerning.get(&pair).copied().unwrap_or(0.0);
+        }
+        let boxes: Vec<(f64, f64, f64)> = pens.iter().zip(&text).filter_map(|(&p, ch)| own.glyphs.get(ch).map(|g| (p + g.1[0], g.1[1], p + g.1[2]))).collect();
+        let left = boxes.iter().map(|b| b.0).fold(f64::INFINITY, f64::min);
+        let right = boxes.iter().map(|b| b.2).fold(f64::NEG_INFINITY, f64::max);
+        let top = -boxes.iter().map(|b| b.1).fold(f64::INFINITY, f64::min);
+        let tr = self.title_right(width, height);
+        let s = ((p.base - p.y0) * 1.25 / 1.0f64.max(top)).min((tr - p.x0) / 1.0f64.max(right - left));
+        let cornered = self.tw.corner != 0.0 && self.tw.title_corner == TitleCorner::TopRight;
+        let base = if cornered { self.tw.corner * unit(width, height) + top * s } else { p.base };
+        Some(OwnPlaced { text, pens, s, right: tr, base, ink: (left, right, top) })
+    }
+
     /// Placement of the hostname, in pixels (letter x positions in letter units). Default: ink's top
     /// right corner at CORNER. TITLE_CORNER bottom-left: first letter's foot inset equally from left and
-    /// bottom.
+    /// bottom. In a lettering of the theme's own (`own_place`) in the top right corner, its letters' top,
+    /// baseline and left: what keeps clear of the hostname, or lines up with it, does so with what is
+    /// drawn. (Bottom left, what finds the hostname works from its letters' spacing: there it keeps to
+    /// the theme's lettering's box.) A scene has one hostname lettering: `u`, `cap` and `xs` are the
+    /// theme's lettering's, and do not go with an own lettering's `x0`, `y0` and `base`.
     pub fn title_place(&self, width: i32, height: i32, host: &str, edges: Edges) -> Placed {
+        let p = self.letter_place(width, height, host, edges);
+        match self.own_place(width, height, host, edges).filter(|_| self.tw.title_corner == TitleCorner::TopRight) {
+            Some(o) => Placed { y0: o.base - o.ink.2 * o.s, base: o.base, x0: o.right - (o.ink.1 - o.ink.0) * o.s, ..p },
+            None => p,
+        }
+    }
+
+    /// The hostname's placement in the theme's lettering (`title_place`, without a lettering of its own).
+    fn letter_place(&self, width: i32, height: i32, host: &str, edges: Edges) -> Placed {
         let tw = &self.tw;
         let text = self.title_text(host);
         let u = self.title_unit(width, height, &text);

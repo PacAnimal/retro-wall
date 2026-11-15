@@ -43,6 +43,7 @@ bracket = "#3f3f3f"
 [tweaks]
 day = [6.5, 19.5]           # the hours the sun is up
 title_corner = "top-right"
+corner = 0.03              # the hostname where the upper right bracket's corner was, as racing has it: no brackets in a scene
 title_glow = [[8, 0.2]]
 title_shadow = [4.0, 4.0, 0.0, 1.0, "#3f3f3f"]
 rule = false

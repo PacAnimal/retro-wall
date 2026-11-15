@@ -34,6 +34,7 @@ bracket = "#56662a"
 
 [tweaks]                    # the lettering over the canopy: a deep shadow of the wood's shade, so it reads
 title_corner = "top-right"
+corner = 0.03              # the hostname where the upper right bracket's corner was, as racing has it: no brackets in a scene
 title_glow = [[8, 0.3]]
 title_shadow = [4.0, 6.0, 4.0, 1.4, "#0a0e04"]
 rule = false
