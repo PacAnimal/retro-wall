@@ -341,3 +341,14 @@ fn compositor_start_lines_come_out_as_they_went_in() {
     let run = std::process::Command::new("bash").arg(script).output().expect("bash runs");
     assert!(run.status.success(), "{}{}", String::from_utf8_lossy(&run.stdout), String::from_utf8_lossy(&run.stderr));
 }
+
+/// linux/lib/omarchy: on Omarchy nothing starts at login and the plugin is offered, not forced; the
+/// uninstaller takes out only the picker's links to the scenes and puts the theme's background back
+/// (tests/linux/omarchy).
+#[test]
+#[cfg(target_os = "linux")]
+fn omarchy_install_offers_the_plugin_and_uninstall_takes_out_only_its_own() {
+    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/linux/omarchy");
+    let run = std::process::Command::new("bash").arg(script).output().expect("bash runs");
+    assert!(run.status.success(), "{}{}", String::from_utf8_lossy(&run.stdout), String::from_utf8_lossy(&run.stderr));
+}

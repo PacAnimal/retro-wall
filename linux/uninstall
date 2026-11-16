@@ -30,6 +30,12 @@ program="$here/target/release/retro-wall"      # it puts the settings back: this
 [[ ! -e $share/desktop-before || -x $program ]] ||
 	die "no retro-wall to put the desktop's settings back with: build it first"
 
+# Omarchy: the background the theme's own again, so its plugin stops the wall and starts it no more; the
+# picker without the scenes, and the plugin
+# shellcheck source=lib/omarchy
+. "$here/linux/lib/omarchy"
+! omarchy_present || omarchy_stops
+
 pattern="^$share/retro-wall( |\$)"
 if pkill -u "$(id -u)" -f "$pattern"; then
 	for _ in $(seq 50); do pgrep -u "$(id -u)" -f "$pattern" >/dev/null || break; sleep 0.1; done

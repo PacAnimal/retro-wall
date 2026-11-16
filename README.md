@@ -10,7 +10,7 @@ something in it changed, and stops while the picture is covered or the machine i
 
 [![test](https://github.com/PacAnimal/retro-wall/actions/workflows/test.yml/badge.svg)](https://github.com/PacAnimal/retro-wall/actions/workflows/test.yml)
 ![Linux X11](https://img.shields.io/badge/Linux%20X11-XFCE%20%7C%20KDE%20%7C%20GNOME%20%7C%20Cinnamon%20%7C%20MATE%20%7C%20LXDE-e8813a)
-![Linux Wayland](https://img.shields.io/badge/Linux%20Wayland-sway%20%7C%20Hyprland%20%7C%20KDE%20%7C%20GNOME-e8813a)
+![Linux Wayland](https://img.shields.io/badge/Linux%20Wayland-sway%20%7C%20Hyprland%20%7C%20Omarchy%20%7C%20KDE%20%7C%20GNOME-e8813a)
 ![macOS](https://img.shields.io/badge/macOS-Apple%20silicon-e8813a)
 ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-e8813a)
 ![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-e8813a)
@@ -127,7 +127,7 @@ git clone https://github.com/PacAnimal/retro-wall && cd retro-wall/packaging/aur
 /usr/lib/retro-wall/linux/uninstall         # before removing the package: the desktop's wallpaper back
 ```
 
-**Linux** (Wayland: sway, Hyprland, KDE Plasma, GNOME, and any compositor with layer-shell; X11: XFCE,
+**Linux** (Wayland: sway, Hyprland, Omarchy, KDE Plasma, GNOME, and any compositor with layer-shell; X11: XFCE,
 KDE Plasma, GNOME, Cinnamon, MATE, LXDE, or a window manager alone; glibc 2.35 or
 newer: Debian 12, Ubuntu 22.04 and later):
 
@@ -147,6 +147,14 @@ Wayland does not tell a program where the panels are: give their room with `--re
 like. On KDE Plasma the installer adds a Plasma wallpaper of retro-wall's and a KWin script, which keep
 Plasma's icons and widgets over the wall (Plasma's desktop is started again once, the first time it
 is installed from inside a Wayland session; installed from outside one, from the next login).
+
+On **Omarchy** each theme is a background: it is listed in Omarchy's background picker
+(`Super + Ctrl + W`) with the theme's own, and plays while it is the background, through retro-wall's
+[Omarchy plugin](https://github.com/PacAnimal/omarchy-retro-wall). There the installer starts nothing at
+login and offers to add the plugin, through Omarchy's own `omarchy plugin add`; the uninstaller puts the
+theme's background back and offers to remove it. The bar, its panels, the menus, the notifications, the
+screensaver and the lock screen stay over the wall, which keeps clear of the bar on each monitor and
+pauses while the session is locked or a fullscreen window covers every monitor.
 
 On every desktop the icons, panels, widgets and right-click menu stay over the wall. The install tests
 check that on each desktop below, in a container (`tests/linux/container`): install, update and
@@ -168,6 +176,7 @@ while nothing changes.
 | A window manager alone (openbox) | X11 | Debian 13 | panel, the window manager's menu | the still picture under the wall |
 | sway | Wayland | Debian 13 | bar | over swaybg's wallpaper |
 | Hyprland | Wayland | Arch Linux, in a virtual machine | bar | started from the line added to its config at the next login; tested in a throwaway virtual machine, as it renders only through a KMS device |
+| Omarchy 4.5 | Wayland (Hyprland) | Omarchy, in a virtual machine | bar, panels, menu, notifications, OSD, background picker, screensaver, lock screen | a background in the picker, through [its plugin](https://github.com/PacAnimal/omarchy-retro-wall); checked by hand in a throwaway virtual machine (the plugin's `test/vm`) |
 | Other layer-shell compositors (labwc, niri, COSMIC) | Wayland | not tested | | expected to work as sway does |
 | macOS 11 or later | | macOS (CI) | | the program's tests |
 | Windows 10 and 11 | | built in CI | | the program's tests run on Linux and macOS |
@@ -263,6 +272,10 @@ Options for the autostarted instance go in `~/.config/retro/retro-wall.conf`, on
 `:0.0  --theme winter --battery --pause-screen-off`. In a Wayland session the line of its socket comes
 first (`wayland-1  --theme winter`), then the X display's. The theme, the instruments' layout and plugin
 sources go in `~/.config/retro/retro.toml`.
+
+On Linux and macOS the live wall pauses on `SIGUSR1` and runs again on `SIGUSR2`
+(`pkill -USR1 -f retro-wall`), for a desktop that knows when the wall cannot be seen: the Omarchy
+plugin sends them under a fullscreen window and while the session is locked.
 
 Themes: `phosphor` (the default), `neon_rain`, `night_city`, `aurora`, `winter`, `matrix`, `guybrush`,
 `copperworks`, `racing`, `forest`, `blocky`, `gibson`.

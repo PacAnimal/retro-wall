@@ -12,7 +12,8 @@
 #   2. copies retro-wall (built: target/release/retro-wall, or a retro-wall beside this script's directory)
 #      and the themes to ~/.local/share/retro; installed by a package (a file linux/packaged beside this
 #      script), links to the package's retro-wall instead, so the package's updates are the user's too
-#   3. writes ~/.config/autostart/retro-wall.desktop, so it starts with every session; under sway or
+#   3. writes ~/.config/autostart/retro-wall.desktop, so it starts with every session (on Omarchy: none;
+#      its plugin, added through Omarchy, plays the scene chosen in the background picker); under sway or
 #      Hyprland, which do not read it, it also adds a line, marked, to the compositor's config; under
 #      KDE Plasma, a Plasma wallpaper and a KWin script (lib/kde); where Nemo is, retro-wall to the
 #      desktops it leaves to others (lib/nemo)
@@ -126,6 +127,16 @@ else
 fi
 
 # --- 3. at login ---------------------------------------------------------------------------------------
+
+# Omarchy chooses its background in its own picker: there the plugin plays the scene chosen, and nothing
+# starts the wall at login (lib/omarchy)
+# shellcheck source=lib/omarchy
+. "$here/linux/lib/omarchy"
+if omarchy_present; then
+	rm -f "$autostart"
+	omarchy_starts
+	exit 0
+fi
 
 cat >"$autostart" <<EOF
 [Desktop Entry]

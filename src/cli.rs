@@ -51,7 +51,10 @@ pub const USAGE: &str = "usage: retro-wall [--theme NAME] [--config FILE] [--hos
   --at SECONDS        a snapshot's time on the scene's clock (played frames start there)
   --frames N          a snapshot of N frames, the wall playing on made-up readings, each drawn
                       at its own time however long drawing takes (smooth on a busy machine)
-  --fps F             played frames a second, 10 to 120 (default 30)";
+  --fps F             played frames a second, 10 to 120 (default 30)
+
+  The live desktop pauses on SIGUSR1 and runs again on SIGUSR2 (Linux, macOS): for a desktop
+  that knows when the wall cannot be seen, such as under a fullscreen window.";
 
 /// What to do.
 #[derive(Debug, PartialEq)]

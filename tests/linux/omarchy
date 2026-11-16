@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# linux/lib/omarchy, as linux/install and linux/uninstall use it, against Omarchy's commands stubbed: on
+# Omarchy the installer adds nothing to start at login and, without a terminal to ask in, says how to add
+# the plugin; the uninstaller takes out the background picker's links to the scenes' stills and nothing
+# else, puts the theme's own background back when a scene was the background, and removes the stills.
+# Exit status: 0 passed, 1 failed.
+set -uo pipefail
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+failed=0
+fail() { echo "FAIL  $*"; failed=1; }
+pass() { echo "PASS  $*"; }
+
+export HOME=$work/home
+share=$HOME/.local/share/retro
+mkdir -p "$HOME" "$work/bin" "$share/omarchy"
+calls=$work/calls
+# Omarchy's commands, each recording how it was called
+for c in omarchy-plugin-add omarchy-plugin-remove omarchy-theme-bg-set omarchy-theme-bg-next; do
+	printf '#!/bin/sh\necho "%s $*" >>"%s"\n' "$c" "$calls" >"$work/bin/$c"
+	chmod +x "$work/bin/$c"
+done
+export PATH=$work/bin:$PATH
+out=$work/out
+# shellcheck disable=SC2329  # called by the library sourced below
+say() { printf '%s\n' "$*" >>"$out"; }
+# shellcheck source=../../linux/lib/omarchy
+. "$here/linux/lib/omarchy"
+
+if omarchy_present; then pass "Omarchy is found by its commands"; else fail "Omarchy not found"; fi
+
+# installed with no terminal to ask in: how to add the plugin is said, and nothing is run
+omarchy_starts </dev/null
+if grep -q "omarchy plugin add $omarchy_plugin_url --enable" "$out" && [[ ! -s $calls ]]; then
+	pass "without a terminal, the plugin's command is said, not run"
+else
+	fail "starts: said $(cat "$out"), ran $(cat "$calls" 2>/dev/null)"
+fi
+
+# a scene is the background, the picker has its links, the user has backgrounds and links of their own
+bg=$HOME/.config/omarchy/backgrounds
+theme=$HOME/.local/state/omarchy/current/theme/backgrounds
+mkdir -p "$bg/nord" "$bg/tokyo-night" "$theme" "$HOME/Pictures"
+touch "$share/omarchy/retro-wall-phosphor.png" "$share/omarchy/retro-wall-winter.png" "$theme/1-b.png" "$theme/0-a.png" \
+	"$HOME/Pictures/mine.png" "$bg/nord/own.jpg"
+ln -s "$share/omarchy/retro-wall-phosphor.png" "$bg/nord/retro-wall-phosphor.png"
+ln -s "$share/omarchy/retro-wall-winter.png" "$bg/tokyo-night/retro-wall-winter.png"
+ln -s "$HOME/Pictures/mine.png" "$bg/nord/mine.png"
+ln -s "$share/omarchy/retro-wall-phosphor.png" "$HOME/.local/state/omarchy/current/background"
+mkdir -p "$(omarchy_plugin_dir)"
+: >"$calls"; : >"$out"
+WAYLAND_DISPLAY=wayland-1 omarchy_stops </dev/null
+left=$(find "$bg" -mindepth 2 | sort | sed "s|$bg/||" | tr '\n' ' ')
+if [[ $left == "nord/mine.png nord/own.jpg " ]]; then pass "only the scenes' links are taken out"; else fail "left in backgrounds: $left"; fi
+if grep -qxF "omarchy-theme-bg-set $theme/0-a.png" "$calls"; then pass "the theme's own first background is set back"; else fail "calls: $(cat "$calls")"; fi
+if [[ ! -e $share/omarchy ]]; then pass "the stills are removed"; else fail "the stills are still there"; fi
+if ! grep -q omarchy-plugin-remove "$calls" && grep -q "omarchy plugin remove $omarchy_plugin_id" "$out"; then
+	pass "without a terminal, removing the plugin is said, not run"
+else
+	fail "stops: said $(cat "$out"), ran $(cat "$calls")"
+fi
+
+# another background shown: it is left as it is
+mkdir -p "$share/omarchy"
+ln -sfn "$theme/1-b.png" "$HOME/.local/state/omarchy/current/background"
+: >"$calls"
+WAYLAND_DISPLAY=wayland-1 omarchy_stops </dev/null
+if ! grep -q omarchy-theme-bg "$calls"; then pass "a background of the user's own is left as it is"; else fail "calls: $(cat "$calls")"; fi
+exit $failed

@@ -1,0 +1,71 @@
+# shellcheck shell=bash
+# Sourced by linux/install and linux/uninstall: Omarchy, whose shell draws the background itself and
+# chooses it in its background picker. There the wall is not started at login: its Omarchy plugin
+# (github.com/PacAnimal/omarchy-retro-wall) lists each theme in the background picker and plays the one
+# chosen, as Omarchy's own video backgrounds are played. Omarchy's own command adds the plugin, with its
+# warning and question; nothing here edits Omarchy's files or settings.
+#
+#   omarchy_present    Omarchy is installed
+#   omarchy_starts     the plugin added (asked first, by Omarchy), or how to add it said; a wall already
+#                      playing restarted on this version
+#   omarchy_stops      the background put back to the theme's own if it was a scene of the wall's, the
+#                      picker's entries and their stills removed, and the plugin removed (asked first)
+
+omarchy_plugin_id="io.github.pacanimal.retro-wall"
+omarchy_plugin_url="https://github.com/PacAnimal/omarchy-retro-wall"
+
+omarchy_present() {
+	command -v omarchy-plugin-add >/dev/null || [[ -x ${OMARCHY_PATH:-/usr/share/omarchy}/bin/omarchy-plugin-add ]]
+}
+
+omarchy_cmd() {   # NAME ARGS...: an Omarchy command, from PATH or from Omarchy's own bin
+	local name=$1; shift
+	if command -v "$name" >/dev/null; then "$name" "$@"; else "${OMARCHY_PATH:-/usr/share/omarchy}/bin/$name" "$@"; fi
+}
+
+omarchy_plugin_dir() {
+	printf '%s\n' "$HOME/.config/omarchy/plugins/$omarchy_plugin_id"
+}
+
+omarchy_starts() {
+	if [[ -d $(omarchy_plugin_dir) ]]; then
+		say "Omarchy: the plugin is there; pick a retro-wall scene in the background picker (Super+Ctrl+W)"
+	elif [[ -t 0 && -n ${WAYLAND_DISPLAY:-} ]]; then
+		say "Omarchy: retro-wall's scenes are backgrounds, through its Omarchy plugin; Omarchy asks before adding it"
+		omarchy_cmd omarchy-plugin-add "$omarchy_plugin_url" --enable ||
+			say "the plugin was not added: add it later with: omarchy plugin add $omarchy_plugin_url --enable"
+	else
+		say "Omarchy: add the plugin, then pick a retro-wall scene in the background picker (Super+Ctrl+W):"
+		say "  omarchy plugin add $omarchy_plugin_url --enable"
+	fi
+	# a wall playing now ends, and the plugin starts it again from the program just installed
+	# shellcheck disable=SC2154  # share: the installer's, which sources this
+	if pkill -u "$(id -u)" -f "^$share/retro-wall( |\$)"; then
+		say "the scene playing starts again on this version"
+	fi
+}
+
+omarchy_stops() {
+	local current stills=$share/omarchy link
+	current=$(readlink -f "$HOME/.local/state/omarchy/current/background" 2>/dev/null || :)
+	if [[ -d $HOME/.config/omarchy/backgrounds ]]; then
+		while IFS= read -r link; do rm -f "$link"; done < <(find "$HOME/.config/omarchy/backgrounds" -mindepth 2 -maxdepth 2 -type l -lname "$stills/*")
+	fi
+	if [[ $current == "$stills/"* && -n ${WAYLAND_DISPLAY:-} ]]; then
+		local own
+		own=$(find -L "$HOME/.local/state/omarchy/current/theme/backgrounds" -maxdepth 1 -type f 2>/dev/null | sort | head -n 1)
+		if [[ -n $own ]] && omarchy_cmd omarchy-theme-bg-set "$own" >/dev/null 2>&1; then
+			say "the background is the theme's own again: $(basename "$own")"
+		else
+			omarchy_cmd omarchy-theme-bg-next >/dev/null 2>&1 || :
+		fi
+	fi
+	rm -rf "$stills"
+	if [[ -d $(omarchy_plugin_dir) ]]; then
+		if [[ -t 0 ]]; then
+			omarchy_cmd omarchy-plugin-remove "$omarchy_plugin_id" || say "the plugin stays: remove it with: omarchy plugin remove $omarchy_plugin_id"
+		else
+			say "remove the plugin with: omarchy plugin remove $omarchy_plugin_id"
+		fi
+	fi
+}

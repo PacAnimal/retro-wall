@@ -3,6 +3,25 @@
 Each release, newest first. A change to an interface in "What stays stable" (`EXTENDING.md`) is said
 here with its new number.
 
+## v0.1.7
+
+- **Omarchy**: each theme is a background in Omarchy's background picker, and plays while it is the
+  background, through retro-wall's
+  [Omarchy plugin](https://github.com/PacAnimal/omarchy-retro-wall). The plugin keeps the wall clear of
+  the bar on each monitor, suspends the shell's own background while a scene plays (as Omarchy's video
+  engine does), and pauses the wall under the lock screen, the screensaver and fullscreen windows. On
+  Omarchy the installer starts nothing at login and offers to add the plugin, through
+  `omarchy plugin add`; the uninstaller puts the theme's background back and offers to remove it.
+- **SIGUSR1 and SIGUSR2** (Linux, macOS): the live wall pauses on `SIGUSR1` and runs again on
+  `SIGUSR2`, for a desktop that knows the wall cannot be seen where its compositor still asks for
+  frames.
+- **gibson**, a new theme: a street of a computer's insides as a city of glass towers, every face
+  covered in lists of directories, figures and diagrams, over a circuit board that mirrors them. Files
+  are scanned, carried along the floor or across the street as pulses and written into the other
+  tower's lists; the disk's work sets how many move, the processor's how busy the floor is.
+- The scenes that hide the hostname by default (forest, blocky, gibson, racing) put it, when shown, at
+  the same place, and the matrix's lettering stands where the others' does.
+
 ## v0.1.6
 
 - **blocky**: the pig never goes through anything. Whatever it does off the faces it walks on (a hop

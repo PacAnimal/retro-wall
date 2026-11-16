@@ -558,8 +558,29 @@ impl Default for Timers {
     }
 }
 
+/// Held by another program: SIGUSR1 pauses the wall and SIGUSR2 lets it run again (Unix). A desktop that
+/// knows the wall cannot be seen, where its compositor still asks the wall for frames (a fullscreen window
+/// over every monitor), says so.
+static HELD: AtomicBool = AtomicBool::new(false);
+
+#[cfg(unix)]
+fn listen_for_hold() {
+    extern "C" fn hold(signal: libc::c_int) {
+        HELD.store(signal == libc::SIGUSR1, Ordering::Relaxed);
+    }
+    let handler = hold as extern "C" fn(libc::c_int) as *const () as libc::sighandler_t;
+    // SAFETY: the handler only stores to an atomic, which is async-signal-safe.
+    unsafe {
+        libc::signal(libc::SIGUSR1, handler);
+        libc::signal(libc::SIGUSR2, handler);
+    }
+}
+
 /// Why the wall pauses now, if it does.
 fn pause_reason(d: &impl Display, o: &Options) -> Option<&'static str> {
+    if HELD.load(Ordering::Relaxed) {
+        return Some("held (SIGUSR1)");
+    }
     if o.demo {
         return None;
     }
@@ -580,6 +601,8 @@ fn pause_reason(d: &impl Display, o: &Options) -> Option<&'static str> {
 }
 
 pub fn run(loaded: &Loaded, o: Options) {
+    #[cfg(unix)]
+    listen_for_hold();
     let mut d = Native::open().unwrap_or_else(|e| fail(&e));
     #[cfg(target_os = "linux")]
     if !o.software {
@@ -1056,6 +1079,18 @@ pub fn wallpapers(loaded: &Loaded, o: &Options) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn sigusr1_holds_the_wall_and_sigusr2_lets_it_go() {
+        listen_for_hold();
+        // SAFETY: raise sends the signal to this thread; the handler only stores to an atomic.
+        unsafe { libc::raise(libc::SIGUSR1) };
+        assert!(HELD.load(Ordering::Relaxed));
+        // SAFETY: as above.
+        unsafe { libc::raise(libc::SIGUSR2) };
+        assert!(!HELD.load(Ordering::Relaxed));
+    }
 
     #[test]
     fn each_check_is_due_on_its_own_pace() {
